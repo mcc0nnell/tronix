@@ -1,0 +1,7 @@
+build/
+node_modules/
+.smoke/
+configure.log
+build.log
+*.sock
+*.log

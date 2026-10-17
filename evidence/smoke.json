@@ -1,0 +1,49 @@
+{
+  "schema": "tronix.smoke.v1",
+  "checks": [
+    "native daemon starts and replies via MessagePack",
+    "published Node IPC client works",
+    "Celix adapter capabilities discovered",
+    "raw browser commands denied",
+    "untrusted priority fails closed",
+    "duplicate ID rejected",
+    "Celix demo bundle executes and returns 42",
+    "ack releases terminal results",
+    "background blocker submitted",
+    "mixed priority work admitted",
+    "priority overtakes queued background after active job",
+    "all admitted jobs complete",
+    "monotonic queue deadline expires without execution",
+    "queue admission bounded under overload",
+    "scheduler metrics expose bounded pending and single active task",
+    "300 rotating agents do not exhaust native identity slots",
+    "all accepted load work finished"
+  ],
+  "snapshots": {
+    "peak": {
+      "admitted": 137,
+      "rejected": 7,
+      "expired": 1,
+      "dispatched": 8,
+      "completed": 7,
+      "failed": 0,
+      "pending": 128,
+      "active": 1,
+      "peakPending": 128,
+      "dispatchSequence": 8
+    },
+    "final": {
+      "admitted": 437,
+      "rejected": 7,
+      "expired": 1,
+      "dispatched": 436,
+      "completed": 436,
+      "failed": 0,
+      "pending": 0,
+      "active": 0,
+      "peakPending": 128,
+      "dispatchSequence": 436
+    }
+  },
+  "outcome": "PASS"
+}
