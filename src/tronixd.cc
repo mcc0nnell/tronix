@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <filesystem>
 #include <chrono>
 #include <functional>
 #include <set>
@@ -202,21 +204,23 @@ int main(int argc,char** argv){
     struct stat st{};
     if(lstat(path.c_str(),&st)==0){std::fprintf(stderr,"refusing to replace existing path\n");return 2;}
     celix_properties_t* cfg=celix_properties_create();
-    const std::string cache="/tmp/tronix-celix-"+std::to_string(getpid());
+    char cache_name[]="/tmp/tronix-celix-XXXXXX";
+    if(!mkdtemp(cache_name)){std::fprintf(stderr,"private Celix cache allocation failed\n");return 3;}
+    const std::string cache=cache_name;
     celix_properties_set(cfg,CELIX_FRAMEWORK_CACHE_DIR,cache.c_str());
     celix_properties_setBool(cfg,CELIX_FRAMEWORK_CLEAN_CACHE_DIR_ON_CREATE,true);
     auto* framework=celix_frameworkFactory_createFramework(cfg);
-    if(!framework){std::fprintf(stderr,"Celix initialization failed\n");return 3;}
+    if(!framework){std::fprintf(stderr,"Celix initialization failed\n");std::filesystem::remove_all(cache);return 3;}
     auto* ctx=celix_framework_getFrameworkContext(framework);
     if(celix_bundleContext_installBundle(ctx,argv[4],true)<0 ||
        celix_bundleContext_installBundle(ctx,argv[6],true)<0){
         std::fprintf(stderr,"bundle installation failed\n");
-        celix_frameworkFactory_destroyFramework(framework);return 3;
+        celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;
     }
     bool sch=with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,[](auto*){});
     bool ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
-        celix_frameworkFactory_destroyFramework(framework);return 3;}
+        celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
     Runtime rt{ctx};std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;
@@ -242,5 +246,6 @@ int main(int argc,char** argv){
     if(fd>=0)close(fd);
     if(bound)unlink(path.c_str());
     celix_frameworkFactory_destroyFramework(framework);
+    std::filesystem::remove_all(cache);
     return bound?0:4;
 }

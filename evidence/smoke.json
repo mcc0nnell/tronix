@@ -21,28 +21,28 @@
   ],
   "snapshots": {
     "peak": {
-      "admitted": 137,
-      "rejected": 7,
+      "admitted": 138,
+      "rejected": 6,
       "expired": 1,
-      "dispatched": 8,
-      "completed": 7,
+      "dispatched": 9,
+      "completed": 8,
       "failed": 0,
       "pending": 128,
       "active": 1,
       "peakPending": 128,
-      "dispatchSequence": 8
+      "dispatchSequence": 9
     },
     "final": {
-      "admitted": 437,
-      "rejected": 7,
+      "admitted": 438,
+      "rejected": 6,
       "expired": 1,
-      "dispatched": 436,
-      "completed": 436,
+      "dispatched": 437,
+      "completed": 437,
       "failed": 0,
       "pending": 0,
       "active": 0,
       "peakPending": 128,
-      "dispatchSequence": 436
+      "dispatchSequence": 437
     }
   },
   "outcome": "PASS"
