@@ -10,3 +10,5 @@ build.log
 .thread-run/
 thread-configure.log
 thread-build.log
+# OpenThread simulator creates local flash images here; never commit these.
+tmp/

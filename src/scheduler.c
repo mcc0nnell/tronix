@@ -80,11 +80,11 @@ static int agent_slot(runtime_t* r, const char* agent, int allocate) {
     }
     return -1;
 }
-static int admit(void* ptr,const char* id,const char* agent,const char* op,int lane,uint32_t deadline_ms) {
+static int admit(void* ptr,const char* id,const char* agent,const char* op,int lane,uint32_t deadline_ms,uint32_t budget_ms) {
     runtime_t* r=(runtime_t*)ptr;
     if(!valid(id,TRONIX_ID_MAX)||!valid(agent,TRONIX_AGENT_MAX)||
        !valid(op,TRONIX_OP_MAX)||(lane!=0&&lane!=1)||
-       deadline_ms==0||deadline_ms>30000) return -1;
+       deadline_ms==0||deadline_ms>30000||budget_ms==0||budget_ms>30000) return -1;
     pthread_mutex_lock(&r->lock);
     expire_pending_locked(r,mono_ns());
     int slot=-1, own=0;
@@ -105,7 +105,9 @@ static int admit(void* ptr,const char* id,const char* agent,const char* op,int l
     strcpy(job->id,id); strcpy(job->agent,agent); strcpy(job->operation,op);
     job->lane=lane; job->state=TRONIX_QUEUED;
     job->enqueued_seq=++r->enqueued_sequence;
-    job->deadline_ns=mono_ns()+(uint64_t)deadline_ms*1000000ULL;
+    job->enqueued_ns=mono_ns();
+    job->deadline_ns=job->enqueued_ns+(uint64_t)deadline_ms*1000000ULL;
+    job->budget_ms=budget_ms;
     r->stats.pending++; r->stats.admitted++;
     if(r->stats.pending>r->stats.peak_pending) r->stats.peak_pending=r->stats.pending;
     pthread_mutex_unlock(&r->lock); return 0;
@@ -138,21 +140,33 @@ static int claim(void* ptr,tronix_job_t* out) {
     if(selected<0) {pthread_mutex_unlock(&r->lock);return 0;}
     tronix_job_t* job=&r->jobs[selected];
     job->state=TRONIX_RUNNING;job->dispatch_seq=++r->stats.sequence;
+    job->queue_wait_ns=mono_ns()-job->enqueued_ns;
+    r->stats.total_queue_wait_ns+=job->queue_wait_ns;
+    if(job->queue_wait_ns>r->stats.max_queue_wait_ns)
+        r->stats.max_queue_wait_ns=job->queue_wait_ns;
     r->stats.pending--;r->stats.active=1;r->stats.dispatched++;
     int a=agent_slot(r,job->agent,0);
     if(a>=0)r->agents[a].dispatched[lane]++;
     *out=*job;
     pthread_mutex_unlock(&r->lock);return 1;
 }
-static int complete(void* ptr,const char* id,int ok,int64_t result) {
+static int complete(void* ptr,const char* id,int ok,int64_t result,uint64_t execution_ns) {
     runtime_t* r=(runtime_t*)ptr;
     pthread_mutex_lock(&r->lock);
     for(int i=0;i<MAX_JOBS;i++) {
         tronix_job_t* job=&r->jobs[i];
         if(job->state==TRONIX_RUNNING && strcmp(job->id,id)==0) {
-            job->state=ok?TRONIX_DONE:TRONIX_FAILED;job->value=result;
+            const int overrun=execution_ns>(uint64_t)job->budget_ms*1000000ULL;
+            job->execution_ns=execution_ns;
+            job->state=overrun?TRONIX_OVERRUN:(ok?TRONIX_DONE:TRONIX_FAILED);
+            job->value=overrun?0:result;
+            r->stats.total_execution_ns+=execution_ns;
+            if(execution_ns>r->stats.max_execution_ns)
+                r->stats.max_execution_ns=execution_ns;
             r->stats.active=0;
-            if(ok)r->stats.completed++;else r->stats.failed++;
+            if(overrun)r->stats.overrun++;
+            else if(ok)r->stats.completed++;
+            else r->stats.failed++;
             pthread_mutex_unlock(&r->lock);return 1;
         }
     }

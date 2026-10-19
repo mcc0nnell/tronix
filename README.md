@@ -18,9 +18,14 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
 - Monotonic queue-wait deadlines, including expiry accounting while another operation
   is active; fixed-capacity admission (128 global pending, 32 per agent), one active
   operation, strict request shapes, request-ID collision rejection, result lookup
-  and explicit acknowledgment.
+  and explicit acknowledgment. The Unix listener backlog is 128 connections.
+- Trusted adapter-defined execution budgets. On completion, the runtime accounts
+  for elapsed execution and flags over-budget work as `overrun` (without returning
+  its value). This is **non-preemptive**: already-performed side effects are not
+  canceled, and a hung bundle can still block the worker.
 - The synthetic adapter supports `demo.constant` -> 42, `demo.pause` -> 1 after
-  15ms, and `demo.slow` -> 1 after 150ms for deadline regression testing.
+  15ms, `demo.slow` -> 1 after 150ms, and `demo.overrun` -> a 150ms
+  operation with a trusted 20ms execution budget for regression testing.
 - An optional reviewed Celix CDP bundle supports only `browser.constant` -> 42
   through the existing isolated WindAnvil browser fixture. **No raw CDP or arbitrary
   shell commands are reachable from this interface.**
@@ -88,12 +93,15 @@ must contain exactly the documented keys, with no caller-provided `lane`,
 ```
 
 Other actions: `ping`, `capabilities`, `snapshot`.
-Results include `queued`, `running`, `completed`, `failed`, or `expired`.
+Results include `queued`, `running`, `completed`, `failed`, `expired`, or `overrun`.
 Terminal results consume one of 256 bounded slots until acknowledged. Duplicate
 IDs are rejected while retained. Deadlines apply **only until dispatch**, not
 to in-progress work. Expiry is recorded when the scheduler is next accessed,
 including through `result` or `snapshot` while a job is running; it is not
-an independent real-time timer.
+an independent real-time timer. The v1 MessagePack wire format is unchanged;
+results now also expose `budgetMs`, `queueWaitNs`, and `executionNs` for known
+jobs. `snapshot` adds `overrun` and cumulative/max execution and queue-wait
+nanoseconds. Celix service ABI **2.0.0** intentionally rejects old adapter bundles.
 
 The optional JavaScript `TronixClient` is in `src/client.mjs`. It is an
 IPC client, **not** the execution or scheduling runtime.
@@ -108,7 +116,10 @@ IPC client, **not** the execution or scheduling runtime.
   sandboxed. Only load reviewed bundles.
 - No crash-safe queue, WAL, durable receipts, replay, or OS scheduler priority.
   Result memory is bounded and a crashed daemon loses its work.
-- Jobs are non-preemptive; deadlines apply to time spent waiting for dispatch.
+- Jobs are non-preemptive; queue deadlines apply to time spent waiting for
+  dispatch. Execution budgets are assessed **after** the operation returns.
+  This is a post-hoc fail-closed receipt, not an OS-level watchdog, cancellation,
+  resource isolation, rollback, or hard real-time enforcement.
 - Celix can register/unregister services, but **runtime hot-reload is not
   implemented** in this version.
 - The current event loop accepts one bounded client request at a time. It is
@@ -121,8 +132,11 @@ IPC client, **not** the execution or scheduling runtime.
 ## Verification
 
 Run `npm test` for the native smoke suite and regressions. In particular,
-`tests/hardening.mjs` confirms that queued deadlines expire while a different
-operation remains active, and that SIGTERM shuts down an idle daemon promptly.
+`tests/hardening.mjs` confirms expiry during busy execution, execution-budget
+accounting and client-side override rejection, and prompt idle shutdown.
+Run `npm run test:bench` to measure an optional 64-job/8-agent burst with a
+synthetic 150ms blocking operation. It prints observed p50/p95 timings rather
+than asserting hard real-time latency guarantees.
 
 The opt-in browser fixture can be tested with `TRONIX_GATEWAY_MODULE` pointing
 at an absolute, reviewed WindAnvil CDP gateway module and `npm run test:cdp`.
@@ -132,10 +146,10 @@ receipts under `evidence/`.
 
 ## Next engineering milestone
 
-Benchmark dispatch latency, wakeup jitter and fairness under adversarial
-burst loads; the worker no longer polls while idle, but real-time deadlines
-are not guaranteed. Add execution-time budgets, auditable result receipts,
-verified client identity, and backpressure measurements before considering
+The next milestone is *actual* execution-time interruption/containment in a
+separate process, not merely post-hoc overrun receipts. Measure wakeup jitter,
+large-burst fairness, and backpressure on multiple systems. Add crash-safe
+receipts, identity-bound admission, and bounded-memory provenance before any
 multi-user or embedded production use.
 
 

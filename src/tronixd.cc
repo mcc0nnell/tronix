@@ -39,7 +39,7 @@ template<class S,class F> bool with_service(celix_bundle_context_t* ctx,const ch
     std::function<void(S*)> cb=fn;
     celix_service_use_options_t opts{};
     opts.filter.serviceName=name;
-    opts.filter.versionRange="[1.0.0,2.0.0)";
+    opts.filter.versionRange="[2.0.0,3.0.0)";
     opts.callbackHandle=&cb;
     opts.use=[](void* h,void* s){(*static_cast<std::function<void(S*)>*>(h))(static_cast<S*>(s));};
     return celix_bundleContext_useServiceWithOptions(ctx,&opts);
@@ -61,10 +61,14 @@ void worker(Runtime* r){
             [&](auto* s){claimed=s->claim(s->handle,&j);});
         if(claimed==1){
             int64_t value=0;int ok=0;
+            const auto began=std::chrono::steady_clock::now();
             with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
                 [&](auto* s){ok=s->execute(s->handle,j.operation,&value);});
+            const auto execution_ns=static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now()-began).count());
             with_service<tronix_scheduler_service_t>(r->ctx,TRONIX_SCHEDULER_SERVICE,
-                [&](auto* s){s->complete(s->handle,j.id,ok,value);});
+                [&](auto* s){s->complete(s->handle,j.id,ok,value,execution_ns);});
         } else {
             std::unique_lock<std::mutex> lock(r->wake_mutex);
             r->wake.wait(lock,[&]{
@@ -145,15 +149,18 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         for(const auto& op:ops)pk.pack(op);
     }else if(q.action=="submit"){
         // Trusted op policy chooses priority. Never accept caller-supplied lanes.
-        int lane=-1;
+        int lane=-1;uint32_t budget_ms=0;
         with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
-            [&](auto* svc){if(svc->lane_for)lane=svc->lane_for(svc->handle,q.operation.c_str());});
+            [&](auto* svc){
+                if(svc->lane_for)lane=svc->lane_for(svc->handle,q.operation.c_str());
+                if(svc->budget_for)budget_ms=svc->budget_for(svc->handle,q.operation.c_str());
+            });
         int code=-5;
-        if(lane>=0){
+        if((lane==0||lane==1)&&budget_ms>0&&budget_ms<=30000){
             code=-4;
             with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
                 [&](auto* s){code=s->admit(s->handle,q.id.c_str(),q.agent.c_str(),
-                                           q.operation.c_str(),lane,q.deadline_ms);});
+                                           q.operation.c_str(),lane,q.deadline_ms,budget_ms);});
         }
         if(code==0){
             // Hold the same mutex as wait(): no notify-before-sleep gap.
@@ -171,13 +178,18 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         tronix_job_t j{};int found=0;
         with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
             [&](auto* s){found=s->lookup(s->handle,q.id.c_str(),&j);});
-        pk.pack_map(found&&j.state==TRONIX_DONE?6:5);
+        pk.pack_map(found?(j.state==TRONIX_DONE?9:8):5);
         key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(found!=0);
         key(pk,"id");pk.pack(q.id);key(pk,found?"state":"error");
         pk.pack(std::string(!found?"NOT_FOUND":j.state==TRONIX_QUEUED?"queued":
             j.state==TRONIX_RUNNING?"running":j.state==TRONIX_DONE?"completed":
-            j.state==TRONIX_FAILED?"failed":"expired"));
+            j.state==TRONIX_FAILED?"failed":j.state==TRONIX_OVERRUN?"overrun":"expired"));
         key(pk,"dispatchSequence");pk.pack(j.dispatch_seq);
+        if(found){
+            key(pk,"budgetMs");pk.pack(j.budget_ms);
+            key(pk,"queueWaitNs");pk.pack(j.queue_wait_ns);
+            key(pk,"executionNs");pk.pack(j.execution_ns);
+        }
         if(found&&j.state==TRONIX_DONE){key(pk,"value");pk.pack(j.value);}
     }else if(q.action=="ack"){
         int done=0;
@@ -190,13 +202,18 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
             [&](auto* svc){svc->snapshot(svc->handle,&s);});
         pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
-        key(pk,"stats");pk.pack_map(10);
+        key(pk,"stats");pk.pack_map(15);
         key(pk,"admitted");pk.pack(s.admitted);key(pk,"rejected");pk.pack(s.rejected);
         key(pk,"expired");pk.pack(s.expired);key(pk,"dispatched");pk.pack(s.dispatched);
         key(pk,"completed");pk.pack(s.completed);key(pk,"failed");pk.pack(s.failed);
         key(pk,"pending");pk.pack(s.pending);key(pk,"active");pk.pack(s.active);
         key(pk,"peakPending");pk.pack(s.peak_pending);
         key(pk,"dispatchSequence");pk.pack(s.sequence);
+        key(pk,"overrun");pk.pack(s.overrun);
+        key(pk,"totalQueueWaitNs");pk.pack(s.total_queue_wait_ns);
+        key(pk,"maxQueueWaitNs");pk.pack(s.max_queue_wait_ns);
+        key(pk,"totalExecutionNs");pk.pack(s.total_execution_ns);
+        key(pk,"maxExecutionNs");pk.pack(s.max_execution_ns);
     }
     return std::string(b.data(),b.size());
 }
@@ -268,7 +285,7 @@ int main(int argc,char** argv){
         mode_t previous=umask(0077);
         bound=bind(fd,(sockaddr*)&addr,sizeof(addr))==0;
         umask(previous);
-        if(bound){chmod(path.c_str(),0600);if(listen(fd,32)!=0)bound=false;}
+        if(bound){chmod(path.c_str(),0600);if(listen(fd,128)!=0)bound=false;}
     }
     if(bound){
         std::printf("TRONIX_READY %s\n",path.c_str());std::fflush(stdout);

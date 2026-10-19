@@ -56,6 +56,35 @@ try {
   check('occupied operation completes',(await client.result('block')).state==='completed');
   check('completed operation acknowledged',(await client.ack('block')).ok);
 
+  // Execution budget belongs to the adapter; clients cannot override it.
+  const untrusted=await client.request('submit',{
+    id:'untrusted-budget',agent:'fixture',operation:'demo.overrun',
+    deadlineMs:2000,budgetMs:10000
+  });
+  check('caller-provided execution budget rejected by strict protocol',
+    untrusted.ok===false && untrusted.error==='BAD_REQUEST');
+  check('trusted overrun fixture admitted',
+    (await client.submit('overrun-fixture','fixture','demo.overrun',2000)).ok);
+  let overtime;
+  for(let i=0;i<180;i++){
+    overtime=await client.result('overrun-fixture');
+    if(['overrun','completed','failed','expired'].includes(overtime.state))break;
+    await delay(5);
+  }
+  check('over-budget execution returns overrun, not success',
+    overtime?.state==='overrun' &&
+    !Object.hasOwn(overtime,'value') &&
+    overtime.budgetMs===20 && overtime.executionNs>20_000_000);
+  check('non-preemptive operation duration measured',
+    overtime.executionNs>=100_000_000);
+  const timing=(await client.snapshot()).stats;
+  check('execution and queue-wait metrics tracked',
+    timing.overrun===1 && timing.totalExecutionNs>=overtime.executionNs &&
+    timing.maxExecutionNs>=overtime.executionNs &&
+    timing.totalQueueWaitNs>=0 && timing.maxQueueWaitNs>=0);
+  check('overrun remains acknowledgeable',
+    (await client.ack('overrun-fixture')).ok);
+
   const exited=new Promise(resolve=>proc.once('close',resolve));
   const shutdownStart=performance.now();
   proc.kill('SIGTERM');

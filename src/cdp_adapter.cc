@@ -44,6 +44,7 @@ bool recv_all(int fd,void* ptr,size_t n) {
 int lane_for(void*,const char* operation) {
     return operation&&std::strcmp(operation,"browser.constant")==0?1:-1;
 }
+uint32_t budget_for(void*,const char* op){return lane_for(nullptr,op)>=0?5000:0;}
 const char* operations(void*){return "browser.constant";}
 int execute(void* handle,const char* op,int64_t* value){
     auto* self=static_cast<CdpAdapter*>(handle);
@@ -103,7 +104,8 @@ celix_status_t start(CdpAdapter* self,celix_bundle_context_t* ctx){
        st.st_uid!=geteuid()||(st.st_mode & 077)!=0)return CELIX_SERVICE_EXCEPTION;
     std::strcpy(self->socket_path,sock);
     self->service.handle=self;self->service.execute=execute;
-    self->service.lane_for=lane_for;self->service.operations=operations;
+    self->service.lane_for=lane_for;self->service.budget_for=budget_for;
+    self->service.operations=operations;
     celix_service_registration_options_t opts{};
     opts.svc=&self->service;
     opts.serviceName=TRONIX_OPERATION_SERVICE;

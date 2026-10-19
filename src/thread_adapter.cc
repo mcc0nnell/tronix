@@ -24,6 +24,7 @@ int lane_for(void*, const char* op) {
     return op && (std::strcmp(op,"thread.nodes_up")==0 ||
                   std::strcmp(op,"thread.leaders")==0) ? 0 : -1;
 }
+uint32_t budget_for(void*,const char* op) { return lane_for(nullptr,op)>=0 ? 5000 : 0; }
 const char* operations(void*) { return "thread.nodes_up,thread.leaders"; }
 bool write_exact(int fd,const void* ptr,size_t n) {
     auto* b=static_cast<const char*>(ptr);
@@ -113,7 +114,8 @@ celix_status_t start(ThreadAdapter* d,celix_bundle_context_t* ctx) {
         return CELIX_SERVICE_EXCEPTION;
     std::strcpy(d->path,path);
     d->service.handle=d;d->service.execute=execute;
-    d->service.lane_for=lane_for;d->service.operations=operations;
+    d->service.lane_for=lane_for;d->service.budget_for=budget_for;
+    d->service.operations=operations;
     celix_service_registration_options_t opts{};
     opts.svc=&d->service;opts.serviceName=TRONIX_OPERATION_SERVICE;
     opts.serviceVersion=TRONIX_ABI_VERSION;

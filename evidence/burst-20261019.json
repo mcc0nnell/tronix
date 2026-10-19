@@ -1,0 +1,36 @@
+{
+  "schema": "tronix.burst.v1",
+  "outcome": "PASS",
+  "workload": {
+    "operations": 64,
+    "agents": 8,
+    "blockingOperationMs": 150,
+    "lane": "interactive"
+  },
+  "queueWaitMs": {
+    "p50": 139.812,
+    "p95": 145.832,
+    "max": 146.306
+  },
+  "executionMs": {
+    "p50": 0.032,
+    "p95": 0.08
+  },
+  "counters": {
+    "admitted": 65,
+    "rejected": 0,
+    "expired": 0,
+    "dispatched": 65,
+    "completed": 65,
+    "failed": 0,
+    "pending": 0,
+    "active": 0,
+    "peakPending": 64,
+    "dispatchSequence": 65,
+    "overrun": 0,
+    "totalQueueWaitNs": 9022376254,
+    "maxQueueWaitNs": 146305816,
+    "totalExecutionNs": 152594102,
+    "maxExecutionNs": 150146136
+  }
+}

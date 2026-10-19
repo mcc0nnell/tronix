@@ -28,7 +28,12 @@
       "pending": 0,
       "active": 0,
       "peakPending": 1,
-      "dispatchSequence": 21
+      "dispatchSequence": 21,
+      "overrun": 0,
+      "totalQueueWaitNs": 2366933,
+      "maxQueueWaitNs": 837610,
+      "totalExecutionNs": 55259193,
+      "maxExecutionNs": 6722001
     },
     "chrome": "dedicated loopback Chrome 152 fixture",
     "gateway": {
