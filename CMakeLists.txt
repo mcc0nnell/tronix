@@ -50,3 +50,13 @@ target_link_libraries(tronixd PRIVATE Celix::framework pthread)
 set_target_properties(tronixd PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}/apache-celix/libs/framework;${CMAKE_BINARY_DIR}/apache-celix/libs/utils")
 file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tronix-paths.env"
   CONTENT "daemon=$<TARGET_FILE:tronixd>\nscheduler=$<TARGET_PROPERTY:tronix_scheduler,BUNDLE_FILE>\ndemo=$<TARGET_PROPERTY:tronix_demo,BUNDLE_FILE>\n")
+
+# Restricted OpenThread network-observation Celix bundle.
+# Talks only to an explicitly configured private, owned telemetry bridge.
+add_celix_bundle(tronix_thread
+  VERSION 0.1.0 SYMBOLIC_NAME org.tronix.adapter.thread
+  NAME "Tronix read-only Thread telemetry adapter"
+  FILENAME tronix_thread SOURCES src/thread_adapter.cc)
+target_include_directories(tronix_thread PRIVATE include "${MSGPACK_SOURCE}/include")
+target_compile_definitions(tronix_thread PRIVATE MSGPACK_NO_BOOST=1)
+target_link_libraries(tronix_thread PRIVATE Celix::framework)

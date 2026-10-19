@@ -5,3 +5,8 @@ configure.log
 build.log
 *.sock
 *.log
+
+.openthread-sim-build/
+.thread-run/
+thread-configure.log
+thread-build.log

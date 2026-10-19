@@ -137,3 +137,12 @@ burst loads; the worker no longer polls while idle, but real-time deadlines
 are not guaranteed. Add execution-time budgets, auditable result receipts,
 verified client identity, and backpressure measurements before considering
 multi-user or embedded production use.
+
+
+## Thread telemetry prototype (local-only)
+
+See [docs-thread-pilot.md](docs-thread-pilot.md) for the isolated OpenThread
+POSIX simulation, native Celix adapter, and end-to-end test. Build the
+optional `tronix_thread_bundle` target and run `npm run test:thread`.
+It exposes read-only `thread.nodes_up` and `thread.leaders` counts over
+private sockets. This is neither a LoRaWAN gateway nor a deployed radio network.
