@@ -36,6 +36,13 @@ add_celix_bundle(tronix_demo
   FILENAME tronix_demo SOURCES src/demo.c)
 target_include_directories(tronix_demo PRIVATE include)
 target_link_libraries(tronix_demo PRIVATE Celix::framework)
+add_celix_bundle(tronix_cdp
+  VERSION 0.2.0 SYMBOLIC_NAME org.tronix.adapter.cdp
+  NAME "Tronix bounded CDP observation adapter"
+  FILENAME tronix_cdp SOURCES src/cdp_adapter.cc)
+target_include_directories(tronix_cdp PRIVATE include "${MSGPACK_SOURCE}/include")
+target_compile_definitions(tronix_cdp PRIVATE MSGPACK_NO_BOOST=1)
+target_link_libraries(tronix_cdp PRIVATE Celix::framework)
 add_executable(tronixd src/tronixd.cc)
 target_include_directories(tronixd PRIVATE include "${MSGPACK_SOURCE}/include")
 target_compile_definitions(tronixd PRIVATE MSGPACK_NO_BOOST=1)

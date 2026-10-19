@@ -13,15 +13,25 @@ static int execute(void* handle,const char* op,int64_t* value) {
     (void)handle;
     if(!op || !value)return 0;
     if(strcmp(op,"demo.constant")==0){*value=42;return 1;}
-    if(strcmp(op,"demo.pause")==0) {
-        struct timespec ts={.tv_sec=0,.tv_nsec=15000000L};
+    if(strcmp(op,"demo.pause")==0 || strcmp(op,"demo.slow")==0) {
+        struct timespec ts={.tv_sec=0,
+            .tv_nsec=strcmp(op,"demo.slow")==0 ? 150000000L : 15000000L};
         nanosleep(&ts,NULL);*value=1;return 1;
     }
     return 0;
 }
+static int lane_for(void* handle,const char* op) {
+    (void)handle;
+    if(!op)return -1;
+    if(strcmp(op,"demo.constant")==0)return 1;
+    if(strcmp(op,"demo.pause")==0 || strcmp(op,"demo.slow")==0)return 0;
+    return -1;
+}
+static const char* operations(void* handle){(void)handle;return "demo.constant,demo.pause,demo.slow";}
 static celix_status_t start(demo_t* d,celix_bundle_context_t* ctx) {
     memset(d,0,sizeof(*d));d->service_id=-1;
     d->service.handle=d;d->service.execute=execute;
+    d->service.lane_for=lane_for;d->service.operations=operations;
     celix_service_registration_options_t opts=CELIX_EMPTY_SERVICE_REGISTRATION_OPTIONS;
     opts.svc=&d->service;opts.serviceName=TRONIX_OPERATION_SERVICE;
     opts.serviceVersion=TRONIX_ABI_VERSION;

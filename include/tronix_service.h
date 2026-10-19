@@ -42,6 +42,10 @@ typedef struct {
 typedef struct {
     void* handle;
     int (*execute)(void*, const char* operation, int64_t* result);
+    /* Trusted bundle chooses authorization and scheduling lane; -1 means deny. */
+    int (*lane_for)(void*, const char* operation);
+    /* Comma-separated static operation names, no untrusted fields. */
+    const char* (*operations)(void*);
 } tronix_operation_service_t;
 #ifdef __cplusplus
 }

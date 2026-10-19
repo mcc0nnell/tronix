@@ -1,7 +1,9 @@
 # TRONIX v0.1 — experimental native agent runtime
 
-**Status:** built and smoke-tested on the isolated Butcher development host. Not installed
-as a system daemon, not connected to the live CDP gateway, and not production-ready.
+**Status:** native Celix scheduler and demo adapter built and smoke-tested on the
+isolated Butcher development host. A restricted CDP observation adapter has also
+been exercised against a dedicated isolated Chrome fixture; it is not deployed
+as a production gateway. Not installed as a system daemon or production-ready.
 
 TRONIX borrows specific _scheduling ideas_ from TRON / μITRON, not implementation
 code, TRON branding rights, or hard-real-time guarantees. It currently consists of:
@@ -10,14 +12,18 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
 - `tronix_scheduler.zip`: native C Celix scheduler **service bundle**.
 - `tronix_demo.zip`: separately packaged, registered Celix operation **service bundle**.
 - v1 MessagePack over length-prefixed private AF_UNIX sockets. Chrome CDP remains JSON.
-- One asynchronous dispatch worker; two trusted lanes, up to 4 interactive
-  operations before background progress, per-agent fair-share selection.
-- Monotonic queue-wait deadlines, fixed-capacity admission (128 global pending,
-  32 per agent), one active operation, strict request shapes, request-ID collision
-  rejection, result lookup and explicit acknowledgment.
-- Safe first adapter operations only: `demo.constant` -> 42 and
-  `demo.pause` -> 1 after a fixed 15ms sleep. **No raw CDP or arbitrary
-  shell commands are reachable.**
+- One event-driven dispatch worker (generation-guarded condition variable,
+  no 1ms idle polling); two trusted lanes, up to 4 interactive operations
+  before background progress, per-agent fair-share selection.
+- Monotonic queue-wait deadlines, including expiry accounting while another operation
+  is active; fixed-capacity admission (128 global pending, 32 per agent), one active
+  operation, strict request shapes, request-ID collision rejection, result lookup
+  and explicit acknowledgment.
+- The synthetic adapter supports `demo.constant` -> 42, `demo.pause` -> 1 after
+  15ms, and `demo.slow` -> 1 after 150ms for deadline regression testing.
+- An optional reviewed Celix CDP bundle supports only `browser.constant` -> 42
+  through the existing isolated WindAnvil browser fixture. **No raw CDP or arbitrary
+  shell commands are reachable from this interface.**
 
 ## Reproduce the build
 
@@ -85,7 +91,9 @@ Other actions: `ping`, `capabilities`, `snapshot`.
 Results include `queued`, `running`, `completed`, `failed`, or `expired`.
 Terminal results consume one of 256 bounded slots until acknowledged. Duplicate
 IDs are rejected while retained. Deadlines apply **only until dispatch**, not
-to in-progress work.
+to in-progress work. Expiry is recorded when the scheduler is next accessed,
+including through `result` or `snapshot` while a job is running; it is not
+an independent real-time timer.
 
 The optional JavaScript `TronixClient` is in `src/client.mjs`. It is an
 IPC client, **not** the execution or scheduling runtime.
@@ -105,14 +113,27 @@ IPC client, **not** the execution or scheduling runtime.
   implemented** in this version.
 - The current event loop accepts one bounded client request at a time. It is
   a lab prototype, not an optimized high-concurrency server.
-- Current tests exercise synthetic adapter operations, **not Chrome**, CDP
-  isolation, Omarchy, or multi-host deployment. No production throughput or
-  timing guarantee is implied by the local smoke test.
+- The smoke/hardening tests cover the native demo adapter, deadlines, and
+  shutdown. The optional CDP integration test covers a dedicated owned Chrome
+  target on Butcher; it does not establish browser isolation, multi-host
+  correctness, production throughput, or real-time guarantees.
+
+## Verification
+
+Run `npm test` for the native smoke suite and regressions. In particular,
+`tests/hardening.mjs` confirms that queued deadlines expire while a different
+operation remains active, and that SIGTERM shuts down an idle daemon promptly.
+
+The opt-in browser fixture can be tested with `TRONIX_GATEWAY_MODULE` pointing
+at an absolute, reviewed WindAnvil CDP gateway module and `npm run test:cdp`.
+It uses a disposable dedicated Chrome target on loopback; do not point it at
+an ordinary signed-in browser profile. The test writes local, unsigned
+receipts under `evidence/`.
 
 ## Next engineering milestone
 
-Provide a browser adapter with a narrow explicit capability contract, connect
-it only to a dedicated isolated Chrome target, and benchmark direct CDP versus
-TRONIX admission and MessagePack IPC under equivalent load. Keep browser
-authorization outside the untrusted request envelope; record verifiable
-dispatch/result receipts and apply client identity binding before multi-user use.
+Benchmark dispatch latency, wakeup jitter and fairness under adversarial
+burst loads; the worker no longer polls while idle, but real-time deadlines
+are not guaranteed. Add execution-time budgets, auditable result receipts,
+verified client identity, and backpressure measurements before considering
+multi-user or embedded production use.

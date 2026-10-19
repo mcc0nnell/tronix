@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <functional>
 #include <set>
 #include <stdexcept>
@@ -22,6 +24,7 @@
 #include <thread>
 #include <vector>
 #include <arpa/inet.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -41,9 +44,18 @@ template<class S,class F> bool with_service(celix_bundle_context_t* ctx,const ch
     opts.use=[](void* h,void* s){(*static_cast<std::function<void(S*)>*>(h))(static_cast<S*>(s));};
     return celix_bundleContext_useServiceWithOptions(ctx,&opts);
 }
-struct Runtime {celix_bundle_context_t* ctx; std::atomic<bool> running{true};};
+struct Runtime {
+    celix_bundle_context_t* ctx;
+    std::atomic<bool> running{true};
+    std::atomic<uint64_t> admissions{0};
+    std::mutex wake_mutex;
+    std::condition_variable wake;
+};
 void worker(Runtime* r){
-    while(r->running.load()){
+    while(r->running.load(std::memory_order_acquire)){
+        // Capture the generation before claim so an admission between claim
+        // and wait cannot be lost.
+        const uint64_t observed=r->admissions.load(std::memory_order_acquire);
         tronix_job_t j{};int claimed=0;
         with_service<tronix_scheduler_service_t>(r->ctx,TRONIX_SCHEDULER_SERVICE,
             [&](auto* s){claimed=s->claim(s->handle,&j);});
@@ -53,7 +65,13 @@ void worker(Runtime* r){
                 [&](auto* s){ok=s->execute(s->handle,j.operation,&value);});
             with_service<tronix_scheduler_service_t>(r->ctx,TRONIX_SCHEDULER_SERVICE,
                 [&](auto* s){s->complete(s->handle,j.id,ok,value);});
-        } else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } else {
+            std::unique_lock<std::mutex> lock(r->wake_mutex);
+            r->wake.wait(lock,[&]{
+                return !r->running.load(std::memory_order_acquire) ||
+                    r->admissions.load(std::memory_order_acquire)!=observed;
+            });
+        }
     }
 }
 struct Request{std::string action,id,agent,operation;uint32_t deadline_ms=0;};
@@ -104,25 +122,46 @@ Request parse(const std::vector<char>& payload){
 }
 using P=msgpack::packer<msgpack::sbuffer>;
 void key(P& pk,const char* str){pk.pack(std::string(str));}
-std::string reply(celix_bundle_context_t* ctx,const Request& q){
+std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime){
     msgpack::sbuffer b;P pk(b);
     if(q.action=="ping"){
         pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
-        key(pk,"runtime");pk.pack(std::string("tronix/0.1"));
+        key(pk,"runtime");pk.pack(std::string("tronix/0.2"));
     }else if(q.action=="capabilities"){
-        pk.pack_map(4);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
+        std::string list;
+        bool found=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
+           [&](auto* svc){if(svc->operations)list=svc->operations(svc->handle);});
+        std::vector<std::string> ops;
+        size_t pos=0;
+        while(pos<list.size()){
+            size_t end=list.find(',',pos);
+            if(end==std::string::npos)end=list.size();
+            if(end>pos)ops.emplace_back(list.substr(pos,end-pos));
+            pos=end+1;
+        }
+        pk.pack_map(4);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(found);
         key(pk,"service");pk.pack(std::string(TRONIX_OPERATION_SERVICE));
-        key(pk,"operations");pk.pack_array(2);
-        pk.pack(std::string("demo.constant"));pk.pack(std::string("demo.pause"));
+        key(pk,"operations");pk.pack_array(static_cast<uint32_t>(ops.size()));
+        for(const auto& op:ops)pk.pack(op);
     }else if(q.action=="submit"){
         // Trusted op policy chooses priority. Never accept caller-supplied lanes.
-        int lane=q.operation=="demo.constant"?1:q.operation=="demo.pause"?0:-1;
+        int lane=-1;
+        with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
+            [&](auto* svc){if(svc->lane_for)lane=svc->lane_for(svc->handle,q.operation.c_str());});
         int code=-5;
         if(lane>=0){
             code=-4;
             with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
                 [&](auto* s){code=s->admit(s->handle,q.id.c_str(),q.agent.c_str(),
                                            q.operation.c_str(),lane,q.deadline_ms);});
+        }
+        if(code==0){
+            // Hold the same mutex as wait(): no notify-before-sleep gap.
+            {
+                std::lock_guard<std::mutex> guard(runtime->wake_mutex);
+                runtime->admissions.fetch_add(1,std::memory_order_release);
+            }
+            runtime->wake.notify_one();
         }
         pk.pack_map(4);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(code==0);
         key(pk,"id");pk.pack(q.id);key(pk,code==0?"state":"error");
@@ -180,11 +219,11 @@ void send_frame(int fd,const std::string& bytes){
     uint32_t n=htonl(static_cast<uint32_t>(bytes.size()));
     if(exact_send(fd,&n,4))exact_send(fd,bytes.data(),bytes.size());
 }
-void handle(int fd,celix_bundle_context_t* ctx){
+void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
     uint32_t wire=0;if(!exact_read(fd,&wire,4))return;
     uint32_t len=ntohl(wire);if(len==0||len>MAX_FRAME)return;
     std::vector<char> bytes(len);if(!exact_read(fd,bytes.data(),len))return;
-    try{send_frame(fd,reply(ctx,parse(bytes)));}
+    try{send_frame(fd,reply(ctx,parse(bytes),runtime));}
     catch(const std::exception& e){
         msgpack::sbuffer b;P pk(b);pk.pack_map(3);key(pk,"v");pk.pack(1);
         key(pk,"ok");pk.pack(false);key(pk,"error");
@@ -234,15 +273,26 @@ int main(int argc,char** argv){
     if(bound){
         std::printf("TRONIX_READY %s\n",path.c_str());std::fflush(stdout);
         while(!stop_requested){
+            // Finite wait: exit on SIGTERM even if signal() uses SA_RESTART.
+            pollfd pfd{fd,POLLIN,0};
+            int events=poll(&pfd,1,100);
+            if(events==0 || (events<0 && errno==EINTR))continue;
+            if(events<0 || (pfd.revents&(POLLERR|POLLHUP|POLLNVAL)))break;
+            if(!(pfd.revents&POLLIN))continue;
             int c=accept4(fd,nullptr,nullptr,SOCK_CLOEXEC);
             if(c<0){if(errno==EINTR)continue;break;}
             timeval timeout{2,0};
             setsockopt(c,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
             setsockopt(c,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
-            handle(c,ctx);close(c);
+            handle(c,ctx,&rt);close(c);
         }
     }else std::fprintf(stderr,"private socket bind failed\n");
-    rt.running.store(false);work.join();
+    {
+        std::lock_guard<std::mutex> guard(rt.wake_mutex);
+        rt.running.store(false,std::memory_order_release);
+    }
+    rt.wake.notify_all();
+    work.join();
     if(fd>=0)close(fd);
     if(bound)unlink(path.c_str());
     celix_frameworkFactory_destroyFramework(framework);

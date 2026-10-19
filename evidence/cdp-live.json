@@ -1,0 +1,70 @@
+{
+  "schema": "tronix.cdp-live.v1",
+  "checks": [
+    "reviewed gateway starts owned Chrome target",
+    "native Celix CDP bundle starts",
+    "only browser observation capability advertised",
+    "denied Runtime.evaluate",
+    "denied control.navigateLab",
+    "denied demo.constant",
+    "denied browser.navigate",
+    "authorized browser request admitted",
+    "authorized Celix operation reached real CDP and returned 42",
+    "successful result acknowledged",
+    "21 live read-only CDP observations completed",
+    "single native command in flight and queue drained",
+    "gateway emits completed execution accounting",
+    "exact authorized CDP forwarding; denies did not reach Chrome"
+  ],
+  "metrics": {
+    "observations": 21,
+    "native": {
+      "admitted": 21,
+      "rejected": 0,
+      "expired": 0,
+      "dispatched": 21,
+      "completed": 21,
+      "failed": 0,
+      "pending": 0,
+      "active": 0,
+      "peakPending": 1,
+      "dispatchSequence": 21
+    },
+    "chrome": "dedicated loopback Chrome 152 fixture",
+    "gateway": {
+      "forwarded": 21,
+      "denied": 0,
+      "outcomes": [
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED",
+        "EXECUTED"
+      ]
+    }
+  },
+  "limitations": [
+    "Isolated owned Chrome target on Butcher only",
+    "Bridge and Tronix same Unix UID: no multi-tenant isolation",
+    "Queue wait deadlines are not execution-time guarantees",
+    "No raw CDP access or user-selected operations",
+    "Receipts are local and unsigned; not externally immutable"
+  ],
+  "outcome": "PASS"
+}

@@ -34,6 +34,17 @@ static uint64_t mono_ns(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
+/* Caller holds r->lock. Expiry must progress even if the worker is busy. */
+static void expire_pending_locked(runtime_t* r, uint64_t now) {
+    for (int i=0;i<MAX_JOBS;i++) {
+        tronix_job_t* j=&r->jobs[i];
+        if (j->state==TRONIX_QUEUED && j->deadline_ns<=now) {
+            j->state=TRONIX_EXPIRED;
+            r->stats.pending--;
+            r->stats.expired++;
+        }
+    }
+}
 static int valid(const char* s, size_t max) {
     if (!s) return 0;
     size_t n=strnlen(s,max+1);
@@ -75,6 +86,7 @@ static int admit(void* ptr,const char* id,const char* agent,const char* op,int l
        !valid(op,TRONIX_OP_MAX)||(lane!=0&&lane!=1)||
        deadline_ms==0||deadline_ms>30000) return -1;
     pthread_mutex_lock(&r->lock);
+    expire_pending_locked(r,mono_ns());
     int slot=-1, own=0;
     for(int i=0;i<MAX_JOBS;i++) {
         tronix_job_t* job=&r->jobs[i];
@@ -102,15 +114,12 @@ static int claim(void* ptr,tronix_job_t* out) {
     runtime_t* r=(runtime_t*)ptr;
     if(!out) return 0;
     pthread_mutex_lock(&r->lock);
+    expire_pending_locked(r,mono_ns());
     if(r->stats.active) {pthread_mutex_unlock(&r->lock);return 0;}
-    uint64_t now=mono_ns();
     int count[2]={0,0};
     for(int i=0;i<MAX_JOBS;i++) {
         tronix_job_t* j=&r->jobs[i];
-        if(j->state!=TRONIX_QUEUED) continue;
-        if(j->deadline_ns<=now) {
-            j->state=TRONIX_EXPIRED; r->stats.pending--;r->stats.expired++;
-        } else count[j->lane]++;
+        if(j->state==TRONIX_QUEUED)count[j->lane]++;
     }
     if(count[0]+count[1]==0) {pthread_mutex_unlock(&r->lock);return 0;}
     int lane=(count[1] && (!count[0] || r->interactive_streak<INTERACTIVE_BURST))?1:0;
@@ -153,6 +162,7 @@ static int lookup(void* ptr,const char* id,tronix_job_t* out) {
     runtime_t* r=(runtime_t*)ptr;
     if(!id || !out)return 0;
     pthread_mutex_lock(&r->lock);
+    expire_pending_locked(r,mono_ns());
     for(int i=0;i<MAX_JOBS;i++) if(r->jobs[i].state && strcmp(r->jobs[i].id,id)==0) {
         *out=r->jobs[i];pthread_mutex_unlock(&r->lock);return 1;
     }
@@ -162,6 +172,7 @@ static int ack(void* ptr,const char* id) {
     runtime_t* r=(runtime_t*)ptr;
     if(!id)return 0;
     pthread_mutex_lock(&r->lock);
+    expire_pending_locked(r,mono_ns());
     for(int i=0;i<MAX_JOBS;i++) {
         tronix_job_t* j=&r->jobs[i];
         if(j->state>=TRONIX_DONE && strcmp(j->id,id)==0) {
@@ -174,7 +185,10 @@ static int ack(void* ptr,const char* id) {
 static void snapshot(void* ptr,tronix_stats_t* out) {
     runtime_t* r=(runtime_t*)ptr;
     if(!out)return;
-    pthread_mutex_lock(&r->lock);*out=r->stats;pthread_mutex_unlock(&r->lock);
+    pthread_mutex_lock(&r->lock);
+    expire_pending_locked(r,mono_ns());
+    *out=r->stats;
+    pthread_mutex_unlock(&r->lock);
 }
 static celix_status_t start(runtime_t* r,celix_bundle_context_t* ctx) {
     memset(r,0,sizeof(*r));r->service_id=-1;

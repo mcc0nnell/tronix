@@ -58,9 +58,9 @@ const check=(name,condition)=>{assert.ok(condition,name);report.checks.push(name
 try{
   await ready();
   const ping=await one('ping');
-  check('native daemon starts and replies via MessagePack',ping.ok&&ping.runtime==='tronix/0.1');
+  check('native daemon starts and replies via MessagePack',ping.ok&&ping.runtime==='tronix/0.2');
   const typedClient=new TronixClient(socket);
-  check('published Node IPC client works', (await typedClient.ping()).runtime==='tronix/0.1');
+  check('published Node IPC client works', (await typedClient.ping()).runtime==='tronix/0.2');
   const caps=await one('capabilities');
   check('Celix adapter capabilities discovered',caps.ok&&caps.service==='org.tronix.operation'&&caps.operations.includes('demo.constant'));
   const rejected=await submit('bad-1','attacker','Runtime.evaluate');
