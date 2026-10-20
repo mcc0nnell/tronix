@@ -7,7 +7,8 @@
     "test": "node tests/smoke.mjs && node tests/hardening.mjs && node tests/agent-ledger.mjs && node tests/isolation.mjs && node tests/memory.mjs && node tests/authority.mjs && node tests/peer-policy.mjs",
     "test:cdp": "node tests/cdp-live.mjs",
     "test:thread": "node tests/thread-live.mjs",
-    "test:bench": "node tests/bench-burst.mjs"
+    "test:bench": "node tests/bench-burst.mjs",
+    "test:ihb": "python3 -m unittest discover -s bridge -p 'test_*.py' -v && node tests/ihb-preflight.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "3.1.3"

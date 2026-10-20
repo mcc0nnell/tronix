@@ -1,0 +1,48 @@
+{
+  "adapter_source_sha256": "fd294be811da9afe8d2fa13b30195db77554e5ce4ba2585ba745f9bc3dcdd2ed",
+  "admission": "not_performed",
+  "broker_source_sha256": "fb0c494343887c39044178e793c1a9da82793ea0c99e8ff19aad40d1b51a3b49",
+  "bundle_sha256": "ecef8dbc29a638f5833c2f11a7fffbe42b0d47b7348b621a49ca53009325ad46",
+  "catalog_sha256": "a8d4ce46cbccb09ed117bed052909718fbcac6a7ce2d6da8a220550da4c38f22",
+  "date": "2026-10-20",
+  "focused_test_log_sha256": "fd672ce5d96524966488f7cf2bdfac60637fadcc9f0e1bb20b4719725ca28455",
+  "host": "Butcher local lab",
+  "image_reference": "sha256:169b0a21069175140f9cd5d0d91c4d158b1cf5525ce1dcfd620b8daf336b0dac",
+  "limitations": [
+    "Same-UID local test only, no verified Docker privilege separation",
+    "Preflight checks file hashes, not image availability or runtime safety",
+    "No campaign execution, cancellation, or evidence retrieval implemented",
+    "Local unsigned test evidence, not hosted CI or external attestation"
+  ],
+  "live_integration": {
+    "checks": [
+      "two named synthetic profiles advertised",
+      "arbitrary commands rejected",
+      "injected command rejected by broker",
+      "fragmented approved operation accepted",
+      "fuzz.preflight.safe admitted",
+      "fuzz.preflight.safe verified without executing a campaign",
+      "fuzz.preflight.safe receipt retained",
+      "fuzz.preflight.buggy admitted",
+      "fuzz.preflight.buggy verified without executing a campaign",
+      "fuzz.preflight.buggy receipt retained",
+      "bounded broker exits after requests",
+      "missing broker causes a failed preflight, never a success",
+      "daemon remains healthy"
+    ],
+    "execution": "read-only preflight; no fuzz campaigns or Docker calls",
+    "result": "PASS",
+    "schema": "tronix.ihb-preflight-acceptance.v0"
+  },
+  "original_tronix_regressions": {
+    "log_sha256": "639ae18e7e461035183a669c7f28ad3fea9f5ea8014585699126337efb6efe38",
+    "result": "PASS"
+  },
+  "result": "PASS",
+  "schema": "tronix.ihb-preflight-evidence.v0",
+  "scope": "read-only fixed synthetic profile verification; no fuzz executions",
+  "unit_tests": {
+    "count": 9,
+    "result": "PASS"
+  }
+}

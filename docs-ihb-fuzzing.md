@@ -1,9 +1,12 @@
 # Tronix + IHB native fuzzing — proposed integration
 
-**Status (2026-10-20): architecture proposal, not an implemented Celix adapter.**
-Tronix and IHB remain independent projects. The code in this branch does **not**
-advertise a `fuzz.*` capability, submit campaigns, cancel them, or import
-fuzzing evidence. Do not interpret this design as an operational security boundary.
+**Status (2026-10-20): read-only synthetic preflight implemented; campaign execution still proposed.**
+Tronix and IHB remain independent projects. An opt-in Celix adapter now
+advertises only `fuzz.preflight.safe` and `fuzz.preflight.buggy`; these verify
+fixed reviewed IHB file digests via a private Unix socket and return Tronix
+receipts. The adapter does **not** submit or execute a fuzz campaign, cancel
+work or import finding evidence. See [bridge/README.md](bridge/README.md).
+Do not interpret this preflight as a sandbox or an operational execution boundary.
 
 - Tronix: admission, fair scheduling, bounded execution orchestration, lifecycle
   receipts and visibility into interrupted work.
