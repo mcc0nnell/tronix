@@ -43,13 +43,17 @@ add_celix_bundle(tronix_cdp
 target_include_directories(tronix_cdp PRIVATE include "${MSGPACK_SOURCE}/include")
 target_compile_definitions(tronix_cdp PRIVATE MSGPACK_NO_BOOST=1)
 target_link_libraries(tronix_cdp PRIVATE Celix::framework)
+add_executable(tronix_worker src/worker.cc)
+target_include_directories(tronix_worker PRIVATE include "${MSGPACK_SOURCE}/include")
+target_compile_definitions(tronix_worker PRIVATE MSGPACK_NO_BOOST=1)
+target_link_libraries(tronix_worker PRIVATE Celix::framework)
 add_executable(tronixd src/tronixd.cc)
 target_include_directories(tronixd PRIVATE include "${MSGPACK_SOURCE}/include")
 target_compile_definitions(tronixd PRIVATE MSGPACK_NO_BOOST=1)
 target_link_libraries(tronixd PRIVATE Celix::framework pthread)
 set_target_properties(tronixd PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}/apache-celix/libs/framework;${CMAKE_BINARY_DIR}/apache-celix/libs/utils")
 file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tronix-paths.env"
-  CONTENT "daemon=$<TARGET_FILE:tronixd>\nscheduler=$<TARGET_PROPERTY:tronix_scheduler,BUNDLE_FILE>\ndemo=$<TARGET_PROPERTY:tronix_demo,BUNDLE_FILE>\n")
+  CONTENT "worker=$<TARGET_FILE:tronix_worker>\ndaemon=$<TARGET_FILE:tronixd>\nscheduler=$<TARGET_PROPERTY:tronix_scheduler,BUNDLE_FILE>\ndemo=$<TARGET_PROPERTY:tronix_demo,BUNDLE_FILE>\n")
 
 # Restricted OpenThread network-observation Celix bundle.
 # Talks only to an explicitly configured private, owned telemetry bridge.
