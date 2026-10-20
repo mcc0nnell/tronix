@@ -1,6 +1,7 @@
 // TRONIX opt-in one-shot Celix operation worker.
 // This is fault and timeout containment, NOT a security sandbox.
 #include "tronix_service.h"
+#include "landlock.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
 #include <celix_framework.h>
@@ -76,11 +77,13 @@ bool op_valid(const std::string& name){
     return true;
 }
 int main(int argc,char** argv) {
-    const bool inspect=argc==6 &&
+    const bool landlock=(argc>=1 && strcmp(argv[argc-1],"--landlock")==0);
+    const int base_argc=argc-(landlock?1:0);
+    const bool inspect=base_argc==6 &&
         std::strcmp(argv[1],"--adapter")==0 &&
         std::strcmp(argv[3],"--cache")==0 &&
         std::strcmp(argv[5],"--inspect")==0;
-    const bool execute=argc==11 &&
+    const bool execute=base_argc==11 &&
         std::strcmp(argv[1],"--adapter")==0 &&
         std::strcmp(argv[3],"--operation")==0 &&
         std::strcmp(argv[5],"--cache")==0 &&
@@ -108,10 +111,16 @@ int main(int argc,char** argv) {
     limit(RLIMIT_NOFILE,64);
     limit(RLIMIT_AS,1024ULL*1024*1024);
     limit(RLIMIT_CPU,5);
+    if(landlock && !tronix::install_worker_landlock(adapter,cache)){
+        std::fprintf(stderr,"TRONIX_SANDBOX_DENIED: Landlock policy not enforceable\n");
+        return 75;
+    }
     celix_properties_t* cfg=celix_properties_create();
     // Parent creates and cleans this private directory even after SIGKILL.
     celix_properties_set(cfg,CELIX_FRAMEWORK_CACHE_DIR,cache.c_str());
-    celix_properties_setBool(cfg,CELIX_FRAMEWORK_CLEAN_CACHE_DIR_ON_CREATE,true);
+    // Parent allocated a unique empty cache, and will remove it. Never
+    // delete the cache root inside Landlock (which has no /tmp write access).
+    celix_properties_setBool(cfg,CELIX_FRAMEWORK_CLEAN_CACHE_DIR_ON_CREATE,!landlock);
     auto* framework=celix_frameworkFactory_createFramework(cfg);
     if(!framework)return 5;
     auto* ctx=celix_framework_getFrameworkContext(framework);

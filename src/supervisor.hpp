@@ -40,7 +40,8 @@ inline WorkerOutcome supervise(const std::string& binary,
                                uint32_t budget_ms,
                                const std::atomic<bool>& running,
                                bool inspect=false,
-                               int expected_lane=-1) {
+                               int expected_lane=-1,
+                               bool landlock=false) {
     WorkerOutcome result;
     char cache_name[]="/tmp/tronix-worker-XXXXXX";
     if(!mkdtemp(cache_name))return result;
@@ -76,6 +77,7 @@ inline WorkerOutcome supervise(const std::string& binary,
         const_cast<char*>(lane_arg.c_str()),
         const_cast<char*>("--budget-ms"),
         const_cast<char*>(budget_arg.c_str()),
+        landlock?const_cast<char*>("--landlock"):nullptr,
         nullptr
     };
     char* const inspect_args[]{
@@ -85,6 +87,7 @@ inline WorkerOutcome supervise(const std::string& binary,
         const_cast<char*>("--cache"),
         const_cast<char*>(cache.c_str()),
         const_cast<char*>("--inspect"),
+        landlock?const_cast<char*>("--landlock"):nullptr,
         nullptr
     };
     pid_t pid=-1;
@@ -189,7 +192,8 @@ inline WorkerOutcome supervise(const std::string& binary,
 }
 inline WorkerOutcome inspect_policy(const std::string& binary,
                                     const std::string& adapter,
-                                    const std::atomic<bool>& running){
-    return supervise(binary,adapter,"",0,running,true);
+                                    const std::atomic<bool>& running,
+                                    bool landlock=false){
+    return supervise(binary,adapter,"",0,running,true,-1,landlock);
 }
 } // namespace tronix

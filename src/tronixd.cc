@@ -58,6 +58,7 @@ struct Runtime {
     std::string worker_binary;
     std::string adapter_path;
     std::vector<tronix::OperationPolicy> policies;
+    bool sandbox_landlock=false;
     std::atomic<bool> running{true};
     std::atomic<uint64_t> admissions{0};
     std::mutex wake_mutex;
@@ -81,7 +82,7 @@ void worker(Runtime* r){
                 // new process, never on the daemon's worker thread.
                 const auto outcome=tronix::supervise(r->worker_binary,r->adapter_path,
                                                        j.operation,j.budget_ms,r->running,
-                                                       false,j.lane);
+                                                       false,j.lane,r->sandbox_landlock);
                 ok=outcome.ok;value=outcome.value;
             }else{
                 with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
@@ -459,21 +460,25 @@ void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
 }
 }
 int main(int argc,char** argv){
-    if((argc!=7&&argc!=9&&argc!=11&&argc!=13&&argc!=15)||std::strcmp(argv[1],"--socket")!=0||
+    if((argc!=7&&argc!=9&&argc!=11&&argc!=13&&argc!=15&&argc!=17)||std::strcmp(argv[1],"--socket")!=0||
        std::strcmp(argv[3],"--scheduler")!=0||std::strcmp(argv[5],"--adapter")!=0){
-        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy]\n");
+        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy] [--sandbox landlock]\n");
         return 2;
     }
     std::string journal_path,worker_binary,memory_path,authority_path;
+    bool sandbox_landlock=false;
     for(int i=7;i<argc;i+=2){
         const std::string option=argv[i],value=argv[i+1];
         if(option=="--journal" && journal_path.empty())journal_path=value;
         else if(option=="--worker" && worker_binary.empty())worker_binary=value;
         else if(option=="--memory" && memory_path.empty())memory_path=value;
         else if(option=="--authority" && authority_path.empty())authority_path=value;
+        else if(option=="--sandbox" && !sandbox_landlock && value=="landlock")
+            sandbox_landlock=true;
         else return 2;
     }
-    if((!worker_binary.empty() &&
+    if((sandbox_landlock && worker_binary.empty()) ||
+       (!worker_binary.empty() &&
         (worker_binary[0]!='/' || access(worker_binary.c_str(),X_OK)!=0)) ||
        (!journal_path.empty() && journal_path[0]!='/') ||
        (!memory_path.empty() && memory_path[0]!='/') ||
@@ -514,7 +519,8 @@ int main(int argc,char** argv){
     std::vector<tronix::OperationPolicy> policies;
     if(!worker_binary.empty()){
         const std::atomic<bool> alive{true};
-        auto description=tronix::inspect_policy(worker_binary,argv[6],alive);
+        auto description=tronix::inspect_policy(worker_binary,argv[6],alive,
+                                                 sandbox_landlock);
         if(!description.ok||description.policies.empty()){
             std::fprintf(stderr,"worker policy inspection failed; refusing startup\n");
             celix_frameworkFactory_destroyFramework(framework);
@@ -534,7 +540,8 @@ int main(int argc,char** argv){
         ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
-    Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),worker_binary,argv[6],policies};
+    Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),worker_binary,argv[6],
+               policies,sandbox_landlock};
     std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "node tests/smoke.mjs && node tests/hardening.mjs && node tests/agent-ledger.mjs && node tests/isolation.mjs && node tests/memory.mjs && node tests/authority.mjs",
+    "test": "node tests/smoke.mjs && node tests/hardening.mjs && node tests/agent-ledger.mjs && node tests/isolation.mjs && node tests/memory.mjs && node tests/authority.mjs && node tests/sandbox.mjs",
     "test:cdp": "node tests/cdp-live.mjs",
     "test:thread": "node tests/thread-live.mjs",
     "test:bench": "node tests/bench-burst.mjs"
