@@ -54,6 +54,14 @@ do not roll them back. The daemon still processes one active operation at a time
 The default behavior without `--worker` remains the in-process execution
 path, for backward compatibility. Do not expose a daemon or socket publicly.
 
+## Optional Landlock v1 confinement
+
+With `--worker /absolute/tronix_worker --sandbox landlock`, both adapter
+inspection and execution subprocesses must install the same fixed Landlock
+filesystem/TCP rules before loading adapter code. The main daemon is not
+restricted. See [docs-agent-sandbox.md](docs-agent-sandbox.md). An unsupported
+kernel or failed rule installation blocks startup; no unconfined fallback.
+
 ## Optional UID-bound admission
 
 The Linux-only `--authority PRIVATE.policy` setting enforces a frozen mapping
