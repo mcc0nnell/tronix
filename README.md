@@ -72,6 +72,45 @@ mkdir -p ./private && chmod 700 ./private
 socket is listening. The socket is chmod 0600, must not already exist, and is
 removed on orderly shutdown. **Do not expose the daemon as a public service.**
 
+## Opt-in supervised execution
+
+Tronix now supports an optional one-shot process supervisor for reviewed
+Celix operation bundles. The worker has a wall-time termination path, can
+survive a crash without bringing down the daemon, and preserves the existing
+bounded job/receipt protocol. This is fault containment, NOT sandboxing
+untrusted native code. See [Supervised execution](docs-supervision.md)
+for startup, test coverage, timing allowances and security limitations.
+
+## Opt-in UID-bound capability policy (Linux pilot)
+
+Create a private owned policy file with mode 0600 in a directory that only
+the daemon owner can modify.  For a demo-only identity and capability:
+
+```sh
+printf 'uid %s\nallow demo.constant\n' "$(id -u)" > ./private/peer.policy
+chmod 600 ./private/peer.policy
+# Add --policy "$(pwd)/private/peer.policy" to the tronixd command.
+```
+
+The grammar is one `uid N` directive followed by one or more `allow operation.name`
+directives.  No wildcards or implicit grants.  A valid file is at most 4096
+bytes, owner-only, regular, and not a symlink.  The UID must match the daemon
+owner.  Invalid or empty policy files fail startup.
+
+When `--policy` is provided, the daemon checks the Linux kernel's `SO_PEERCRED`
+UID for every AF_UNIX client, rejects other UIDs before reading their request,
+requires the submitted agent label to be exactly `uid:N`, denies unlisted
+operations before scheduling, and only advertises allowlisted capabilities.
+Use `node tests/peer-policy.mjs` to reproduce policy boundary tests.
+
+**Scope:** This is one Unix principal, not independently authenticated
+agents.  All processes sharing that UID share authority over jobs, events,
+and receipts, and an in-process Celix bundle still executes with daemon
+privileges.  The socket stays mode 0600.  No process sandboxing,
+multi-tenant isolation, preemption, or external attestation is provided.
+Without `--policy`, legacy lab clients remain supported and can claim
+arbitrary agent labels; do not present that mode as authenticated.
+
 ## Protocol v1
 
 A request is a strict MessagePack map. Every frame is:
@@ -146,25 +185,28 @@ Only deploy in a single-user, reviewed-bundle environment.
 
 This is the first persistent **execution** layer, not OpenClaw-equivalent
 agent orchestration. Persistent prompt/fact memory, model planning,
-execution-process isolation, authentication and event subscriptions over
-multiple nodes are **not implemented**.
+execution-process isolation, independent agent authentication, and event
+subscriptions over multiple nodes are **not implemented**.
 
 ## Security and limitations
 
-- Single local user and trust domain. The string `agent` is not authenticated.
-  No multi-user isolation, capability leases, browser context separation, ACLs,
-  or persistent credentials. Other processes with the same Unix UID may access
-  its socket and read or acknowledge other work.
-- Bundle code executes within the daemon's process. A hostile bundle is not
-  sandboxed. Only load reviewed bundles.
+- Single local user and trust domain. Without `--policy`, caller-supplied
+  `agent` labels are unauthenticated. With `--policy`, the Linux peer UID is
+  verified, but all processes under that UID still share job/receipt authority.
+  No independent agent identities, browser context separation, per-process
+  ACLs, capability leases, or persistent credentials.
+- The daemon loads the reviewed adapter bundle in-process for admission
+  even if worker supervision is enabled. A supervised worker uses the
+  same Unix UID, not a security sandbox. Only load reviewed bundles.
 - No crash-safe queue, transactional scheduler/journal boundary, automatic
   job replay, or OS scheduler priority. Without `--journal`, a crashed daemon
   loses its results; with a journal, it retains best-effort run receipts and
   labels unresolved runs `interrupted`.
-- Jobs are non-preemptive; queue deadlines apply to time spent waiting for
-  dispatch. Execution budgets are assessed **after** the operation returns.
-  This is a post-hoc fail-closed receipt, not an OS-level watchdog, cancellation,
-  resource isolation, rollback, or hard real-time enforcement.
+- Queue-wait deadlines end at dispatch. Without the supervisor, execution
+  budgets are assessed after return and execution is non-preemptive. With
+  supervision, the child has a budget-plus-startup-grace termination limit,
+  not a hard real-time guarantee, rollback, or safe cancellation of prior
+  side effects.
 - Celix can register/unregister services, but **runtime hot-reload is not
   implemented** in this version.
 - The current event loop accepts one bounded client request at a time. It is
@@ -194,8 +236,8 @@ receipts under `evidence/`.
 
 ## Next engineering milestone
 
-The next milestone is *actual* execution-time interruption/containment in a
-separate process, not merely post-hoc overrun receipts. Measure wakeup jitter,
+The next milestone is credential and filesystem containment beyond the
+current child process termination. Measure wakeup jitter,
 large-burst fairness, and backpressure on multiple systems. Add atomic scheduling/receipt transitions, identity-bound admission, and bounded-memory provenance before any
 multi-user or embedded production use.
 
