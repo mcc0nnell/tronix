@@ -20,6 +20,11 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
   policy snapshot; children verify matching lane/budget before executing.
 - Opt-in durable agent key/value memory: 512 total keys, owner-private
   MessagePack append journal, bounded pagination and restart replay.
+- Opt-in reviewed **Landlock v1** worker filesystem/TCP restrictions
+  (`--sandbox landlock`): deny unrelated host-file reads, outside-cache
+  writes and TCP bind/connect. Requires kernel ABI 4; no weaker fallback.
+  This does not confine UDP or same-UID privileges; the separate
+  worker supervisor retains its explicit minimal-environment policy.
 - Opt-in Linux `SO_PEERCRED` UID policy: maps a kernel-verified peer UID to
   exactly one agent label and operation allowlist, restricting its job and
   memory access. This does **not** distinguish processes with the same UID.
@@ -127,8 +132,9 @@ IPC client, **not** the execution or scheduling runtime.
 See [docs-agent-runtime.md](docs-agent-runtime.md) for the supervised process
 mode, persistent per-agent key/value memory, failure behavior, capacity limits,
 and current trust boundary. See
-[docs-agent-authority.md](docs-agent-authority.md) for the optional
-UID-bound admission policy and its remaining same-UID limitations.
+[docs-agent-authority.md](docs-agent-authority.md) for optional UID-bound
+admission, and [docs-agent-sandbox.md](docs-agent-sandbox.md) for the
+Landlock v1 worker sandbox and the Bubblewrap blocker on Butcher.
 
 ## Proposed IHB fuzzing integration
 
@@ -187,6 +193,12 @@ across multiple nodes are **not implemented**.
 
 ## Security and limitations
 
+- `--sandbox landlock` applies a fixed Linux v1 Landlock policy in
+  the worker before adapter load. It restricts filesystem read/write and
+  TCP bind/connect, but **does not restrict UDP, abstract AF_UNIX sockets,
+  environment-variable access, or processes sharing the same Unix UID**.
+  The hardened supervisor separately strips ambient environment variables.
+  This is not yet a fully isolated container or a secrets boundary.
 - Without `--authority`, the string `agent` is unverified. With that optional
   Linux mode enabled, a kernel-reported peer UID must match a private policy
   binding for the requested agent and operation. This is **not same-UID
@@ -218,7 +230,8 @@ across multiple nodes are **not implemented**.
 ## Verification
 
 Run `npm test` for the native smoke suite, lifecycle journal, worker
-supervision, durable agent memory, UID-bound admission and regressions.
+supervision, durable agent memory, UID-bound admission, Landlock sandbox
+checks and regressions.
 The agent-ledger test includes restart, forced crash, cursor pagination,
 scheduler expiry reconciliation, overrun receipts and single-writer locking.
 In particular,

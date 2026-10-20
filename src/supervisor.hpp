@@ -39,7 +39,8 @@ inline WorkerOutcome supervise(const std::string& binary,
                                uint32_t budget_ms,
                                const std::atomic<bool>& running,
                                bool inspect=false,
-                               int expected_lane=-1) {
+                               int expected_lane=-1,
+                               bool landlock=false) {
     WorkerOutcome result;
     char cache_name[]="/tmp/tronix-worker-XXXXXX";
     if(!mkdtemp(cache_name))return result;
@@ -92,6 +93,7 @@ inline WorkerOutcome supervise(const std::string& binary,
         const_cast<char*>(lane_arg.c_str()),
         const_cast<char*>("--budget-ms"),
         const_cast<char*>(budget_arg.c_str()),
+        landlock?const_cast<char*>("--landlock"):nullptr,
         nullptr
     };
     char* const inspect_args[]{
@@ -101,11 +103,12 @@ inline WorkerOutcome supervise(const std::string& binary,
         const_cast<char*>("--cache"),
         const_cast<char*>(cache.c_str()),
         const_cast<char*>("--inspect"),
+        landlock?const_cast<char*>("--landlock"):nullptr,
         nullptr
     };
     // Credentials and inherited environment are not forwarded.
-    // Two fixture-only paths are passed explicitly for regression tests,
-    // and never unless an operator opted into the synthetic fixture mode.
+    // Only reviewed, narrowly validated fixture values are passed.
+    // No ambient environment or credential can reach the child.
     const bool fixture=getenv("TRONIX_ISOLATION_FIXTURES") &&
         std::strcmp(getenv("TRONIX_ISOLATION_FIXTURES"),"1")==0;
     const auto fixture_path=[&](const char* name)->std::string {
@@ -115,16 +118,35 @@ inline WorkerOutcome supervise(const std::string& binary,
     };
     std::string marker=fixture_path("TRONIX_ACTIVATOR_MARKER");
     std::string drift=fixture_path("TRONIX_POLICY_DRIFT_FILE");
+    std::string read_probe=fixture_path("TRONIX_READ_PROBE");
+    std::string write_probe=fixture_path("TRONIX_WRITE_PROBE");
+    std::string connect_port;
+    if(fixture){
+        const char* port=getenv("TRONIX_CONNECT_PORT");
+        if(port && *port && std::strlen(port)<=5){
+            bool digits=true;
+            unsigned p=0;
+            for(const char* c=port;*c;c++){
+                if(*c<'0'||*c>'9'){digits=false;break;}
+                p=p*10+static_cast<unsigned>(*c-'0');
+            }
+            if(digits && p>=1 && p<=65535)
+                connect_port=std::string("TRONIX_CONNECT_PORT=")+port;
+        }
+    }
     char path_env[]="PATH=/usr/bin:/bin";
     char lang_env[]="LANG=C";
     char locale_env[]="LC_ALL=C";
     char fixture_env[]="TRONIX_ISOLATION_FIXTURES=1";
-    char* envp[7]{};
+    char* envp[10]{};
     size_t e=0;
     envp[e++]=path_env;envp[e++]=lang_env;envp[e++]=locale_env;
     if(fixture)envp[e++]=fixture_env;
     if(!marker.empty())envp[e++]=marker.data();
     if(!drift.empty())envp[e++]=drift.data();
+    if(!read_probe.empty())envp[e++]=read_probe.data();
+    if(!write_probe.empty())envp[e++]=write_probe.data();
+    if(!connect_port.empty())envp[e++]=connect_port.data();
     envp[e]=nullptr;
     pid_t pid=-1;
     const int err=posix_spawn(&pid,binary.c_str(),&actions,&attrs,
@@ -228,7 +250,8 @@ inline WorkerOutcome supervise(const std::string& binary,
 }
 inline WorkerOutcome inspect_policy(const std::string& binary,
                                     const std::string& adapter,
-                                    const std::atomic<bool>& running){
-    return supervise(binary,adapter,"",0,running,true);
+                                    const std::atomic<bool>& running,
+                                    bool landlock=false){
+    return supervise(binary,adapter,"",0,running,true,-1,landlock);
 }
 } // namespace tronix

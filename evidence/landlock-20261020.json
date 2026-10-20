@@ -1,0 +1,25 @@
+{
+  "schema": "tronix.landlock.v1",
+  "outcome": "PASS",
+  "checks": [
+    "Landlock ABI 4 admission inspection started",
+    "demo.constant admitted",
+    "normal Celix work survives filesystem restriction",
+    "demo.read_probe admitted",
+    "private host file read returns EACCES",
+    "secret unchanged",
+    "demo.write_probe admitted",
+    "host file creation outside cache returns EACCES",
+    "unauthorized file absent",
+    "demo.net_probe admitted",
+    "TCP connect to real loopback listener returns EACCES",
+    "unapproved commands remain denied",
+    "Landlock requires separate supervised worker",
+    "unsupported Bubblewrap backend fails closed",
+    "memory works independently of child Landlock",
+    "receipt retains measured denied access"
+  ],
+  "observedReadErrno": 13,
+  "observedWriteErrno": 13,
+  "observedConnectErrno": 13
+}
