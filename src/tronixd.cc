@@ -3,6 +3,7 @@
 #include "events.hpp"
 #include "supervisor.hpp"
 #include "memory.hpp"
+#include "authority.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
 #include <celix_framework.h>
@@ -30,6 +31,7 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -52,6 +54,7 @@ struct Runtime {
     celix_bundle_context_t* ctx;
     tronix::Ledger* ledger;
     tronix::AgentMemory* memory;
+    const tronix::Authority* authority;
     std::string worker_binary;
     std::string adapter_path;
     std::vector<tronix::OperationPolicy> policies;
@@ -201,7 +204,27 @@ void pack_event(P& pk,const tronix::Event& e) {
     key(pk,"kind");pk.pack(std::string("agent.lifecycle"));
     if(e.has_value){key(pk,"value");pk.pack(e.value);}
 }
-std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime){
+std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime,
+                  const tronix::Identity* caller){
+    // The caller is the verified Linux peer UID's frozen policy, not a
+    // user-supplied agent label. Null means the legacy unauthenticated mode.
+    const bool restricted=runtime->authority!=nullptr;
+    auto denied=[&](const std::string& error)->std::string{
+        msgpack::sbuffer b;P pk(b);pk.pack_map(3);
+        key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(false);
+        key(pk,"error");pk.pack(error);
+        return std::string(b.data(),b.size());
+    };
+    if(restricted && !caller)return denied("DENIED");
+    if(restricted &&
+       (q.action=="submit" || q.action=="memory_put" ||
+        q.action=="memory_get" || q.action=="memory_delete" ||
+        q.action=="memory_list") && q.agent!=caller->agent)
+        return denied("DENIED");
+    if(restricted && q.action=="submit" && !caller->allows(q.operation))
+        return denied("DENIED");
+    if(restricted && q.action=="snapshot")
+        return denied("DENIED");
     msgpack::sbuffer b;P pk(b);
     if(q.action=="ping"){
         pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
@@ -223,6 +246,11 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
                 if(end>pos)ops.emplace_back(list.substr(pos,end-pos));
                 pos=end+1;
             }
+        }
+        if(restricted){
+            std::vector<std::string> permitted;
+            for(const auto& op:ops)if(caller->allows(op))permitted.push_back(op);
+            ops=std::move(permitted);
         }
         pk.pack_map(4);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(found);
         key(pk,"service");pk.pack(std::string(TRONIX_OPERATION_SERVICE));
@@ -272,6 +300,8 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         tronix_job_t j{};int found=0;
         with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
             [&](auto* s){found=s->lookup(s->handle,q.id.c_str(),&j);});
+        if(found && restricted && std::string(j.agent)!=caller->agent)
+            found=0; // Do not reveal another agent's job ID or state.
         if(found && j.state==TRONIX_EXPIRED)
             runtime->ledger->emit(j.id,j.agent,j.operation,"expired",j.dispatch_seq);
         pk.pack_map(found?(j.state==TRONIX_DONE?9:8):5);
@@ -292,8 +322,10 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
             [&](auto* s){s->lookup(s->handle,q.id.c_str(),&prior);});
         int done=0;
-        with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
-            [&](auto* s){done=s->ack(s->handle,q.id.c_str());});
+        if(!restricted || (prior.state && std::string(prior.agent)==caller->agent)){
+            with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
+                [&](auto* s){done=s->ack(s->handle,q.id.c_str());});
+        }
         if(done && prior.state) {
             if(prior.state==TRONIX_EXPIRED)
                 runtime->ledger->emit(prior.id,prior.agent,prior.operation,"expired",prior.dispatch_seq);
@@ -332,7 +364,8 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         }
     }else if(q.action=="receipt"){
         tronix::Event e;
-        const bool found=runtime->ledger->get(q.id,e);
+        const bool exists=runtime->ledger->get(q.id,e);
+        const bool found=exists && (!restricted || e.agent==caller->agent);
         pk.pack_map(found?4:3);key(pk,"v");pk.pack(1);
         key(pk,"ok");pk.pack(found);
         if(found){key(pk,"receipt");pack_event(pk,e);key(pk,"persisted");pk.pack(runtime->ledger->durable());}
@@ -347,12 +380,16 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
             if(found && j.state==TRONIX_EXPIRED)
                 runtime->ledger->emit(j.id,j.agent,j.operation,"expired",j.dispatch_seq);
         }
-        auto ev=runtime->ledger->since(q.after,q.limit);
-        auto oldest=runtime->ledger->oldest();
+        auto ev=restricted?runtime->ledger->since_agent(q.after,q.limit,caller->agent):
+                           runtime->ledger->since(q.after,q.limit);
+        auto oldest=restricted?runtime->ledger->oldest_agent(caller->agent):
+                               runtime->ledger->oldest();
+        auto latest=restricted?runtime->ledger->last_agent(caller->agent):
+                               runtime->ledger->last();
         pk.pack_map(7);
         key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
         key(pk,"oldestSeq");pk.pack(oldest);
-        key(pk,"lastSeq");pk.pack(runtime->ledger->last());
+        key(pk,"lastSeq");pk.pack(latest);
         key(pk,"truncated");pk.pack(oldest>0 && q.after<oldest-1);
         key(pk,"persisted");pk.pack(runtime->ledger->durable());
         key(pk,"events");pk.pack_array(static_cast<uint32_t>(ev.size()));
@@ -397,10 +434,22 @@ void send_frame(int fd,const std::string& bytes){
     if(exact_send(fd,&n,4))exact_send(fd,bytes.data(),bytes.size());
 }
 void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
+    const tronix::Identity* caller=nullptr;
+    if(runtime->authority){
+#ifdef SO_PEERCRED
+        struct ucred cred{};
+        socklen_t credlen=sizeof(cred);
+        if(getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&cred,&credlen)!=0 ||
+           credlen!=sizeof(cred))return; // Fail closed when kernel credentials unavailable.
+        caller=runtime->authority->lookup(cred.uid);
+#else
+        return; // This experimental authority only supports Linux peer credentials.
+#endif
+    }
     uint32_t wire=0;if(!exact_read(fd,&wire,4))return;
     uint32_t len=ntohl(wire);if(len==0||len>MAX_FRAME)return;
     std::vector<char> bytes(len);if(!exact_read(fd,bytes.data(),len))return;
-    try{send_frame(fd,reply(ctx,parse(bytes),runtime));}
+    try{send_frame(fd,reply(ctx,parse(bytes),runtime,caller));}
     catch(const std::exception& e){
         msgpack::sbuffer b;P pk(b);pk.pack_map(3);key(pk,"v");pk.pack(1);
         key(pk,"ok");pk.pack(false);key(pk,"error");
@@ -410,27 +459,36 @@ void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
 }
 }
 int main(int argc,char** argv){
-    if((argc!=7&&argc!=9&&argc!=11&&argc!=13)||std::strcmp(argv[1],"--socket")!=0||
+    if((argc!=7&&argc!=9&&argc!=11&&argc!=13&&argc!=15)||std::strcmp(argv[1],"--socket")!=0||
        std::strcmp(argv[3],"--scheduler")!=0||std::strcmp(argv[5],"--adapter")!=0){
-        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem]\n");
+        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy]\n");
         return 2;
     }
-    std::string journal_path,worker_binary,memory_path;
+    std::string journal_path,worker_binary,memory_path,authority_path;
     for(int i=7;i<argc;i+=2){
         const std::string option=argv[i],value=argv[i+1];
         if(option=="--journal" && journal_path.empty())journal_path=value;
         else if(option=="--worker" && worker_binary.empty())worker_binary=value;
         else if(option=="--memory" && memory_path.empty())memory_path=value;
+        else if(option=="--authority" && authority_path.empty())authority_path=value;
         else return 2;
     }
     if((!worker_binary.empty() &&
         (worker_binary[0]!='/' || access(worker_binary.c_str(),X_OK)!=0)) ||
        (!journal_path.empty() && journal_path[0]!='/') ||
-       (!memory_path.empty() && memory_path[0]!='/'))return 2;
+       (!memory_path.empty() && memory_path[0]!='/') ||
+       (!authority_path.empty() && authority_path[0]!='/'))return 2;
     const std::string path=argv[2];
     if(path.empty()||path.size()>=sizeof(((sockaddr_un*)0)->sun_path)||path[0]!='/')return 2;
     struct stat st{};
     if(lstat(path.c_str(),&st)==0){std::fprintf(stderr,"refusing to replace existing path\n");return 2;}
+    std::unique_ptr<tronix::Authority> authority;
+    try {
+        if(!authority_path.empty())authority=std::make_unique<tronix::Authority>(authority_path);
+    }catch(const std::exception& e){
+        std::fprintf(stderr,"authority initialization failed: %s\n",e.what());
+        return 2;
+    }
     std::unique_ptr<tronix::Ledger> ledger;
     try { ledger=std::make_unique<tronix::Ledger>(journal_path); }
     catch(const std::exception& e) {
@@ -476,7 +534,7 @@ int main(int argc,char** argv){
         ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
-    Runtime rt{ctx,ledger.get(),memory.get(),worker_binary,argv[6],policies};
+    Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),worker_binary,argv[6],policies};
     std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;

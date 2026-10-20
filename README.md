@@ -20,6 +20,9 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
   policy snapshot; children verify matching lane/budget before executing.
 - Opt-in durable agent key/value memory: 512 total keys, owner-private
   MessagePack append journal, bounded pagination and restart replay.
+- Opt-in Linux `SO_PEERCRED` UID policy: maps a kernel-verified peer UID to
+  exactly one agent label and operation allowlist, restricting its job and
+  memory access. This does **not** distinguish processes with the same UID.
   **No arbitrary shell tools, model planner or semantic/vector memory.**
 - One event-driven dispatch worker (generation-guarded condition variable,
   no 1ms idle polling); two trusted lanes, up to 4 interactive operations
@@ -123,7 +126,9 @@ IPC client, **not** the execution or scheduling runtime.
 
 See [docs-agent-runtime.md](docs-agent-runtime.md) for the supervised process
 mode, persistent per-agent key/value memory, failure behavior, capacity limits,
-and current trust boundary.
+and current trust boundary. See
+[docs-agent-authority.md](docs-agent-authority.md) for the optional
+UID-bound admission policy and its remaining same-UID limitations.
 
 ## Native lifecycle and receipts (first agent-kernel slice)
 
@@ -167,10 +172,11 @@ across multiple nodes are **not implemented**.
 
 ## Security and limitations
 
-- Single local user and trust domain. The string `agent` is not authenticated.
-  No multi-user isolation, capability leases, browser context separation, ACLs,
-  or persistent credentials. Other processes with the same Unix UID may access
-  its socket and read or acknowledge other work.
+- Without `--authority`, the string `agent` is unverified. With that optional
+  Linux mode enabled, a kernel-reported peer UID must match a private policy
+  binding for the requested agent and operation. This is **not same-UID
+  process isolation**. Other processes sharing the UID still share that agent's
+  powers. The socket remains 0600; multi-UID access is not implemented.
 - Default execution loads the reviewed adapter in-process. Opt-in `--worker`
   performs adapter initialization and policy inspection in subprocesses; no
   adapter bundle is activated in the daemon. **Neither mode is a sandbox** for
@@ -197,7 +203,7 @@ across multiple nodes are **not implemented**.
 ## Verification
 
 Run `npm test` for the native smoke suite, lifecycle journal, worker
-supervision, durable agent memory and regressions.
+supervision, durable agent memory, UID-bound admission and regressions.
 The agent-ledger test includes restart, forced crash, cursor pagination,
 scheduler expiry reconciliation, overrun receipts and single-writer locking.
 In particular,

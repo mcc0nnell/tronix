@@ -54,6 +54,16 @@ do not roll them back. The daemon still processes one active operation at a time
 The default behavior without `--worker` remains the in-process execution
 path, for backward compatibility. Do not expose a daemon or socket publicly.
 
+## Optional UID-bound admission
+
+The Linux-only `--authority PRIVATE.policy` setting enforces a frozen mapping
+of kernel-verified `SO_PEERCRED` UIDs to one agent label and an operation
+allowlist. It also filters results, acknowledgements, receipts and memory
+access for that agent. **Different processes with the same UID remain
+equally authorized.** Socket mode is still 0600, and this feature does not
+provision multi-UID clients. See
+[docs-agent-authority.md](docs-agent-authority.md).
+
 ## Persistent per-agent key/value memory
 
 With `--memory /absolute/private/agent-memory.mp`, the daemon exposes four
