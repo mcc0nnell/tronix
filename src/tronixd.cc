@@ -2,6 +2,7 @@
 #include "tronix_service.h"
 #include "events.hpp"
 #include "peer_policy.hpp"
+#include "supervisor.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
 #include <celix_framework.h>
@@ -51,6 +52,8 @@ struct Runtime {
     celix_bundle_context_t* ctx;
     tronix::Ledger* ledger;
     const tronix::PeerPolicy* policy;
+    std::string worker_binary;
+    std::string adapter_path;
     std::atomic<bool> running{true};
     std::atomic<uint64_t> admissions{0};
     std::mutex wake_mutex;
@@ -69,8 +72,16 @@ void worker(Runtime* r){
                 std::fprintf(stderr,"TRONIX_LEDGER_ERROR running %s\n",j.id);
             int64_t value=0;int ok=0;
             const auto began=std::chrono::steady_clock::now();
-            with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
-                [&](auto* s){ok=s->execute(s->handle,j.operation,&value);});
+            if(!r->worker_binary.empty()) {
+                // Fresh executable, never fork() a live Celix framework.
+                const auto outcome=tronix::supervise(r->worker_binary,r->adapter_path,
+                                                      j.operation,j.budget_ms,r->running);
+                ok=outcome.ok;
+                value=outcome.value;
+            } else {
+                with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
+                    [&](auto* s){ok=s->execute(s->handle,j.operation,&value);});
+            }
             const auto execution_ns=static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now()-began).count());
@@ -365,18 +376,24 @@ void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
 int main(int argc,char** argv){
     if(argc<7 || (argc-7)%2!=0 || std::strcmp(argv[1],"--socket")!=0 ||
        std::strcmp(argv[3],"--scheduler")!=0 || std::strcmp(argv[5],"--adapter")!=0) {
-        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--policy PRIVATE.policy]\n");
+        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--policy PRIVATE.policy] [--worker ABSOLUTE.EXE]\n");
         return 2;
     }
-    std::string journal_path,policy_path;
+    std::string journal_path,policy_path,worker_binary;
     for(int i=7;i<argc;i+=2) {
         const std::string option=argv[i];
         if(option=="--journal" && journal_path.empty() && argv[i+1][0])
             journal_path=argv[i+1];
         else if(option=="--policy" && policy_path.empty() && argv[i+1][0])
             policy_path=argv[i+1];
+        else if(option=="--worker" && worker_binary.empty() && argv[i+1][0])
+            worker_binary=argv[i+1];
         else {std::fprintf(stderr,"unexpected or duplicate argument\n");return 2;}
     }
+    // The executable is selected only by the daemon operator, never a client.
+    // Refuse non-absolute or nonexistent workers at startup.
+    if(!worker_binary.empty() &&
+       (worker_binary[0]!='/' || access(worker_binary.c_str(),X_OK)!=0))return 2;
     const std::string path=argv[2];
     if(path.empty()||path.size()>=sizeof(((sockaddr_un*)0)->sun_path)||path[0]!='/')return 2;
     struct stat st{};
@@ -409,7 +426,7 @@ int main(int argc,char** argv){
     bool ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
-    Runtime rt{ctx,ledger.get(),policy.get()};std::thread work(worker,&rt);
+    Runtime rt{ctx,ledger.get(),policy.get(),worker_binary,argv[6]};std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;
     if(fd>=0){
