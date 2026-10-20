@@ -1,0 +1,33 @@
+{
+  "schema": "tronix.agent-ledger.v1",
+  "outcome": "PASS",
+  "checks": [
+    "journal created private",
+    "events rejects extra untrusted fields",
+    "events pagination bounded",
+    "trusted operation admitted",
+    "native completion still returns correct value",
+    "lifecycle ordered queued / running / completed",
+    "receipt survives native ack",
+    "acknowledged receipt retains measured outcome",
+    "cursor pagination omits earlier events",
+    "durable receipt replayed across daemon restart",
+    "durable IDs cannot silently reuse a prior run",
+    "restarted Celix daemon healthy",
+    "event sequence survives restart",
+    "slow fixture admitted",
+    "operation was running before induced crash",
+    "interrupted run marked explicitly, not reported as success",
+    "crash recovery does not redispatch original job",
+    "recovery appended sequenced interruption event",
+    "trusted overrun fixture admitted",
+    "over-budget execution remains a terminal failure",
+    "overrun receipt persists but cannot invent successful value",
+    "blocking fixture admitted",
+    "short-lived pending operation admitted",
+    "event poll reconciles queued expiration without result polling",
+    "second journal writer is refused",
+    "capabilities remain restricted",
+    "journal actually holds bytes"
+  ]
+}

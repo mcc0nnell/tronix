@@ -44,4 +44,6 @@ export class TronixClient {
   result(id){return this.request('result',{id});}
   ack(id){return this.request('ack',{id});}
   snapshot(){return this.request('snapshot');}
+  events(after=0,limit=16){return this.request('events',{after,limit});}
+  receipt(id){return this.request('receipt',{id});}
 }

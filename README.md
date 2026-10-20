@@ -12,6 +12,9 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
 - `tronix_scheduler.zip`: native C Celix scheduler **service bundle**.
 - `tronix_demo.zip`: separately packaged, registered Celix operation **service bundle**.
 - v1 MessagePack over length-prefixed private AF_UNIX sockets. Chrome CDP remains JSON.
+- Native agent lifecycle events and receipt lookup, with opt-in owner-private
+  append-only MessagePack journal for restart inspection. **No arbitrary agent
+  tools, shell execution, model loop, or prompt memory were added.**
 - One event-driven dispatch worker (generation-guarded condition variable,
   no 1ms idle polling); two trusted lanes, up to 4 interactive operations
   before background progress, per-agent fair-share selection.
@@ -61,7 +64,8 @@ Run the daemon only against a private disposable directory:
 mkdir -p ./private && chmod 700 ./private
 ./build/tronixd --socket "$(pwd)/private/tronix.sock" \
   --scheduler "$(pwd)/build/tronix_scheduler.zip" \
-  --adapter "$(pwd)/build/tronix_demo.zip"
+  --adapter "$(pwd)/build/tronix_demo.zip" \
+  --journal "$(pwd)/private/events.mp"
 ```
 
 `TRONIX_READY` is emitted after Celix services are registered and the local
@@ -106,6 +110,45 @@ nanoseconds. Celix service ABI **2.0.0** intentionally rejects old adapter bundl
 The optional JavaScript `TronixClient` is in `src/client.mjs`. It is an
 IPC client, **not** the execution or scheduling runtime.
 
+## Native lifecycle and receipts (first agent-kernel slice)
+
+The optional `--journal /absolute/private/events.mp` enables native
+append-only MessagePack receipts. No journal is required for existing
+deployments: without it, events and receipts exist **only in memory**.
+
+- `{v:1,action:"events",after:0,limit:16}` returns ascending events
+  (`queued`, `running`, `completed`, `failed`, `overrun`, `expired`,
+  `acked`, `interrupted`) and `lastSeq`, `oldestSeq`, `truncated`, `persisted`.
+  `limit` is strictly 1..16, and the in-memory window is the latest 512
+  events. An expired queued job is reconciled with the Celix scheduler when
+  clients request events, results, or acknowledgement.
+- `{v:1,action:"receipt",id:"job-1"}` retrieves the last observed status
+  even after acknowledgement; completed values are retained in the receipt.
+- The native event ledger writes an owner-only, non-symlink, single-writer file
+  and synchronizes each appended event. It retains a hard 16 MiB journal cap
+  with 1 MiB reserved for already-admitted transitions; further submissions
+  receive `LEDGER_UNAVAILABLE` when the admission threshold is reached.
+  Rotate/archive offline before that limit; online compaction is not implemented.
+- On restart, unacknowledged `queued` or `running` records become
+  `interrupted`. **Nothing is automatically replayed**, because a stopped
+  operation may have performed side effects. Durable run IDs cannot be reused
+  across process restarts, even after acknowledgement.
+- A torn final journal frame is truncated during recovery; invalid complete
+  frames and concurrent writers fail closed. The private journal is not an
+  authenticity signature or external attestation.
+
+**Evidence boundary:** the scheduler and ledger are not one transactional
+system. A crash between the scheduler transition and its journal write can
+leave the last recorded state incomplete; `interrupted` means the result is
+unknown, not that the tool was canceled or rolled back. Journal I/O errors
+are reported to stderr, but already-admitted operations may still execute.
+Only deploy in a single-user, reviewed-bundle environment.
+
+This is the first persistent **execution** layer, not OpenClaw-equivalent
+agent orchestration. Persistent prompt/fact memory, model planning,
+execution-process isolation, authentication and event subscriptions over
+multiple nodes are **not implemented**.
+
 ## Security and limitations
 
 - Single local user and trust domain. The string `agent` is not authenticated.
@@ -114,8 +157,10 @@ IPC client, **not** the execution or scheduling runtime.
   its socket and read or acknowledge other work.
 - Bundle code executes within the daemon's process. A hostile bundle is not
   sandboxed. Only load reviewed bundles.
-- No crash-safe queue, WAL, durable receipts, replay, or OS scheduler priority.
-  Result memory is bounded and a crashed daemon loses its work.
+- No crash-safe queue, transactional scheduler/journal boundary, automatic
+  job replay, or OS scheduler priority. Without `--journal`, a crashed daemon
+  loses its results; with a journal, it retains best-effort run receipts and
+  labels unresolved runs `interrupted`.
 - Jobs are non-preemptive; queue deadlines apply to time spent waiting for
   dispatch. Execution budgets are assessed **after** the operation returns.
   This is a post-hoc fail-closed receipt, not an OS-level watchdog, cancellation,
@@ -131,7 +176,10 @@ IPC client, **not** the execution or scheduling runtime.
 
 ## Verification
 
-Run `npm test` for the native smoke suite and regressions. In particular,
+Run `npm test` for the native smoke suite, lifecycle journal and regressions.
+The agent-ledger test includes restart, forced crash, cursor pagination,
+scheduler expiry reconciliation, overrun receipts and single-writer locking.
+In particular,
 `tests/hardening.mjs` confirms expiry during busy execution, execution-budget
 accounting and client-side override rejection, and prompt idle shutdown.
 Run `npm run test:bench` to measure an optional 64-job/8-agent burst with a
@@ -148,8 +196,7 @@ receipts under `evidence/`.
 
 The next milestone is *actual* execution-time interruption/containment in a
 separate process, not merely post-hoc overrun receipts. Measure wakeup jitter,
-large-burst fairness, and backpressure on multiple systems. Add crash-safe
-receipts, identity-bound admission, and bounded-memory provenance before any
+large-burst fairness, and backpressure on multiple systems. Add atomic scheduling/receipt transitions, identity-bound admission, and bounded-memory provenance before any
 multi-user or embedded production use.
 
 

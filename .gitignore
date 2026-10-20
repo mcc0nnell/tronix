@@ -12,3 +12,6 @@ thread-configure.log
 thread-build.log
 # OpenThread simulator creates local flash images here; never commit these.
 tmp/
+
+# Owner-private socket and optional native receipt journal.
+private/
