@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node tests/smoke.mjs && node tests/hardening.mjs && node tests/agent-ledger.mjs",
     "test:cdp": "node tests/cdp-live.mjs",
+    "test:lightpanda": "node tests/lightpanda-live.mjs",
     "test:thread": "node tests/thread-live.mjs",
     "test:bench": "node tests/bench-burst.mjs"
   },
