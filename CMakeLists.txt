@@ -86,3 +86,13 @@ if(TRONIX_ENABLE_IHB_PREFLIGHT)
   file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tronix-ihb-preflight-socket.txt"
     CONTENT "${TRONIX_IHB_PREFLIGHT_SOCKET}\n")
 endif()
+
+# Optional restricted Lightpanda Agent Bridge record/replay Celix bundle.
+# Use instead of tronix_cdp; the two adapters are mutually exclusive per runtime.
+add_celix_bundle(tronix_lightpanda_record
+  VERSION 0.1.0 SYMBOLIC_NAME org.tronix.adapter.lightpanda_record
+  NAME "Tronix bounded Lightpanda record/replay adapter"
+  FILENAME tronix_lightpanda_record SOURCES src/lightpanda_record_adapter.cc)
+target_include_directories(tronix_lightpanda_record PRIVATE include "${MSGPACK_SOURCE}/include")
+target_compile_definitions(tronix_lightpanda_record PRIVATE MSGPACK_NO_BOOST=1)
+target_link_libraries(tronix_lightpanda_record PRIVATE Celix::framework)

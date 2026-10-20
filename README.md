@@ -264,3 +264,67 @@ POSIX simulation, native Celix adapter, and end-to-end test. Build the
 optional `tronix_thread_bundle` target and run `npm run test:thread`.
 It exposes read-only `thread.nodes_up` and `thread.leaders` counts over
 private sockets. This is neither a LoRaWAN gateway nor a deployed radio network.
+
+## Lightpanda fork backend (opt-in, local fixture)
+
+Tronix can run its existing, restricted `browser.constant` Celix operation
+against a **pinned Lightpanda executable from
+[mcc0nnell/browser](https://github.com/mcc0nnell/browser)** instead of the
+Chrome/WindAnvil fixture. The backend is
+`src/lightpanda-bridge.mjs` and does not alter the native scheduler ABI,
+public request schema or existing Chrome CDP bridge. It runs the browser as a
+separate child process, observes an operator-owned, ephemeral HTTP fixture on
+`127.0.0.1`, checks for a fixed DOM marker, and returns the existing numeric
+value 42 to the Celix adapter. The child has a hard 2.2-second timeout.
+The fixture server is part of `tests/lightpanda-live.mjs`.
+
+Build the existing `tronixd`, `tronix_scheduler_bundle`, and
+`tronix_cdp_bundle` targets as documented above, then install Node
+dependencies. Set `TRONIX_LIGHTPANDA_BINARY` to an absolute local
+Lightpanda executable and `TRONIX_LIGHTPANDA_SHA256` to **the reviewed
+binary's** SHA-256 (compute with `sha256sum` after identifying its build
+provenance). Run:
+
+```sh
+TRONIX_LIGHTPANDA_BINARY=/absolute/reviewed/lightpanda \
+TRONIX_LIGHTPANDA_SHA256=<64-lowercase-hex-digest> \
+npm run test:lightpanda
+```
+
+The test starts a new loopback-only fixture and a private `0700` bridge
+directory with a `0600` Unix socket. It verifies the configured browser
+hash before starting, rejects non-allowlisted operations, runs three actual
+Lightpanda fetches through the native Celix adapter, checks completion
+receipts and drains the queue, then shuts down. It does not touch logged-in
+browser profiles or navigate arbitrary public sites.
+
+**Security/evidence boundaries:** This is a bounded browser *execution
+backend*, not general agent browser control or a proof of isolation. The
+request protocol still exposes only `browser.constant`; no URLs,
+JavaScript, selectors or shell commands are accepted from clients. The
+admin-configured URL must be `http://127.0.0.1:PORT/`. It is intended for
+a static, trusted local fixture. Run it in a single-user isolated
+development environment: same-UID processes can access the private sockets,
+and the Celix budget remains post-hoc even though the browser child is
+timed out. A chosen digest validates the executable bytes but does **not**
+attest the build origin or make the binary safe. The test does not prove
+public-site compatibility, production security, Chromium parity or
+accessibility conformance.
+
+The separate
+[lightpanda-agent-bridge](https://github.com/mcc0nnell/lightpanda-agent-bridge)
+already supports richer CDP actions and sanitized record/replay. Connecting
+those features to Tronix should require a new, explicitly approved operation
+contract, destination and session policy, stronger process containment, and
+structured results rather than overloading this fixed integer-valued probe.
+
+## Browser workflow recording and replay (experimental)
+
+Tronix now has a separately packaged, opt-in native Celix bundle for the
+existing **Lightpanda Agent Bridge**. It supports fixed `browser.record` and
+`browser.replay` jobs through the native scheduler, actual CDP navigation and
+DOM extraction on an operator-owned loopback fixture, and sanitized local
+SHA-256 observation receipts. See [docs-lightpanda-workflows.md](docs-lightpanda-workflows.md)
+for the architecture, precise reproduction steps, tested negative controls,
+and limitations. This does not enable arbitrary agent browsing or persistent
+browser credentials.
