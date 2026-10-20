@@ -72,6 +72,36 @@ mkdir -p ./private && chmod 700 ./private
 socket is listening. The socket is chmod 0600, must not already exist, and is
 removed on orderly shutdown. **Do not expose the daemon as a public service.**
 
+## Opt-in UID-bound capability policy (Linux pilot)
+
+Create a private owned policy file with mode 0600 in a directory that only
+the daemon owner can modify.  For a demo-only identity and capability:
+
+```sh
+printf 'uid %s\nallow demo.constant\n' "$(id -u)" > ./private/peer.policy
+chmod 600 ./private/peer.policy
+# Add --policy "$(pwd)/private/peer.policy" to the tronixd command.
+```
+
+The grammar is one `uid N` directive followed by one or more `allow operation.name`
+directives.  No wildcards or implicit grants.  A valid file is at most 4096
+bytes, owner-only, regular, and not a symlink.  The UID must match the daemon
+owner.  Invalid or empty policy files fail startup.
+
+When `--policy` is provided, the daemon checks the Linux kernel's `SO_PEERCRED`
+UID for every AF_UNIX client, rejects other UIDs before reading their request,
+requires the submitted agent label to be exactly `uid:N`, denies unlisted
+operations before scheduling, and only advertises allowlisted capabilities.
+Use `node tests/peer-policy.mjs` to reproduce policy boundary tests.
+
+**Scope:** This is one Unix principal, not independently authenticated
+agents.  All processes sharing that UID share authority over jobs, events,
+and receipts, and an in-process Celix bundle still executes with daemon
+privileges.  The socket stays mode 0600.  No process sandboxing,
+multi-tenant isolation, preemption, or external attestation is provided.
+Without `--policy`, legacy lab clients remain supported and can claim
+arbitrary agent labels; do not present that mode as authenticated.
+
 ## Protocol v1
 
 A request is a strict MessagePack map. Every frame is:
@@ -146,15 +176,16 @@ Only deploy in a single-user, reviewed-bundle environment.
 
 This is the first persistent **execution** layer, not OpenClaw-equivalent
 agent orchestration. Persistent prompt/fact memory, model planning,
-execution-process isolation, authentication and event subscriptions over
-multiple nodes are **not implemented**.
+execution-process isolation, independent agent authentication, and event
+subscriptions over multiple nodes are **not implemented**.
 
 ## Security and limitations
 
-- Single local user and trust domain. The string `agent` is not authenticated.
-  No multi-user isolation, capability leases, browser context separation, ACLs,
-  or persistent credentials. Other processes with the same Unix UID may access
-  its socket and read or acknowledge other work.
+- Single local user and trust domain. Without `--policy`, caller-supplied
+  `agent` labels are unauthenticated. With `--policy`, the Linux peer UID is
+  verified, but all processes under that UID still share job/receipt authority.
+  No independent agent identities, browser context separation, per-process
+  ACLs, capability leases, or persistent credentials.
 - Bundle code executes within the daemon's process. A hostile bundle is not
   sandboxed. Only load reviewed bundles.
 - No crash-safe queue, transactional scheduler/journal boundary, automatic
