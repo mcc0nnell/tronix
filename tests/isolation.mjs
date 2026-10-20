@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp,rm,readdir,writeFile,chmod} from 'node:fs/promises';
+import {mkdtemp,rm,readdir,writeFile,chmod,readlink} from 'node:fs/promises';
+import {openSync,closeSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -10,17 +11,23 @@ const root=resolve(import.meta.dirname,'..');
 const dir=await mkdtemp(join(tmpdir(),'tronix-worker-test-'));
 const socket=join(dir,'runtime.sock'),journal=join(dir,'journal.msgpack');
 const policy=join(dir,'policy.conf');
+const sentinel=join(dir,'tronix-fd-canary-demo.txt');
+await writeFile(sentinel,'synthetic nonsecret descriptor canary\n');
+const sentinelFD=openSync(sentinel,'r');
 const principal='uid:'+process.getuid();
 await writeFile(policy,'uid '+process.getuid()+'\n'+
-  ['demo.constant','demo.hang','demo.crash','demo.pid'].map(op=>'allow '+op).join('\n')+'\n',{mode:0o600});
+  ['demo.constant','demo.hang','demo.crash','demo.pid','demo.env_clean','demo.fd_clean','demo.no_new_privs'].map(op=>'allow '+op).join('\n')+'\n',{mode:0o600});
 await chmod(policy,0o600);
 const oldCaches=new Set((await readdir(tmpdir())).filter(n=>n.startsWith('tronix-worker-')));
 const daemon=spawn(join(root,'build/tronixd'),[
   '--socket',socket,'--scheduler',join(root,'build/tronix_scheduler.zip'),
   '--adapter',join(root,'build/tronix_demo.zip'),'--journal',journal,
   '--worker',join(root,'build/tronix_worker'),'--policy',policy
-],{cwd:root,env:{...process.env,TRONIX_ISOLATION_FIXTURES:'1'},
-   stdio:['ignore','pipe','pipe']});
+],{cwd:root,env:{...process.env,TRONIX_ISOLATION_FIXTURES:'1',
+     TRONIX_SECRET_CANARY:'synthetic-secret-not-real'},
+   // fd 5 is intentionally inheritable in the DAEMON, not in the child.
+   stdio:['ignore','pipe','pipe','ignore','ignore',sentinelFD]});
+closeSync(sentinelFD);
 let out='',err='';
 daemon.stdout.on('data',b=>{out+=b.toString();});
 daemon.stderr.on('data',b=>{err+=b.toString();});
@@ -45,6 +52,8 @@ try{
     await delay(10);
   }
   check('native supervised daemon starts',out.includes('TRONIX_READY'));
+  check('parent truly has extra inheritable canary descriptor',
+        (await readlink('/proc/'+daemon.pid+'/fd/5')).includes('tronix-fd-canary-'));
   const cap=await client.capabilities();
   check('trusted demo fixture permits isolation checks',
         cap.operations.includes('demo.hang')&&cap.operations.includes('demo.crash'));
@@ -55,6 +64,18 @@ try{
         pid.value!==daemon.pid&&pid.value>0);
   check('finished worker was reaped',!(() => {try{process.kill(pid.value,0);return true;}catch{return false;}})());
   await client.ack('pid-1');
+  const cleanEnv=await execute('env-clean','demo.env_clean');
+  check('synthetic daemon secret is absent from child environment',
+        cleanEnv.state==='completed' && cleanEnv.value===1);
+  await client.ack('env-clean');
+  const cleanFD=await execute('fd-clean','demo.fd_clean');
+  check('synthetic daemon descriptor is absent from child',
+        cleanFD.state==='completed' && cleanFD.value===1);
+  await client.ack('fd-clean');
+  const noPriv=await execute('no-priv','demo.no_new_privs');
+  check('worker has Linux NO_NEW_PRIVS enforced',
+        noPriv.state==='completed' && noPriv.value===1);
+  await client.ack('no-priv');
   const quick=await execute('quick','demo.constant');
   check('approved child result returned',quick.state==='completed'&&quick.value===42);
   await client.ack('quick');
@@ -72,9 +93,16 @@ try{
   const after=await execute('after','demo.constant');
   check('post-failure worker starts and completes',after.state==='completed'&&after.value===42);
   await client.ack('after');
-  const events=await client.request('events',{after:0,limit:16});
-  check('isolated runs retain sequenced events',events.events.some(e=>e.state==='failed') &&
-        events.events.some(e=>e.state==='overrun'));
+  let cursor=0,events=[];
+  for(let page=0;page<8;page++){
+    const result=await client.request('events',{after:cursor,limit:16});
+    events.push(...result.events);
+    if(!result.events.length || result.lastSeq===result.events.at(-1).seq)break;
+    cursor=result.events.at(-1).seq;
+  }
+  check('isolated runs retain sequenced events',events.some(e=>e.state==='failed') &&
+        events.some(e=>e.state==='overrun') &&
+        events.every((e,i)=>i===0 || e.seq===events[i-1].seq+1));
   const created=(await readdir(tmpdir())).filter(n=>
       n.startsWith('tronix-worker-')&&!oldCaches.has(n));
   check('worker cache cleaned even after SIGKILL',created.length===0);

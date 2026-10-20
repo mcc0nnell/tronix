@@ -18,7 +18,6 @@
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
-extern char** environ;
 
 namespace tronix {
 struct WorkerOutcome {
@@ -42,16 +41,36 @@ inline WorkerOutcome supervise(const std::string& binary,
     int fds[2];
     if(pipe2(fds,O_CLOEXEC|O_NONBLOCK)!=0){cleanup();return result;}
     posix_spawn_file_actions_t actions;
-    posix_spawn_file_actions_init(&actions);
-    // Close the old fd 3 *before* dup2 when the pipe read end is fd 3.
-    posix_spawn_file_actions_addclose(&actions,fds[0]);
-    posix_spawn_file_actions_adddup2(&actions,fds[1],3);
-    if(fds[1]!=3)posix_spawn_file_actions_addclose(&actions,fds[1]);
+    if(posix_spawn_file_actions_init(&actions)!=0){
+        close(fds[0]);close(fds[1]);cleanup();return result;
+    }
+    // The child receives ONLY fd 0..2 plus its one-shot result pipe on fd 3.
+    // Closing >=4 after dup2 rejects inherited daemon files/sockets regardless
+    // of whether the parent forgot FD_CLOEXEC. glibc/Linux-specific.
+    bool actions_ok =
+        posix_spawn_file_actions_addclose(&actions,fds[0])==0 &&
+        posix_spawn_file_actions_adddup2(&actions,fds[1],3)==0;
+    if(fds[1]!=3)
+        actions_ok=actions_ok && posix_spawn_file_actions_addclose(&actions,fds[1])==0;
+    actions_ok=actions_ok && posix_spawn_file_actions_addclosefrom_np(&actions,4)==0;
+    // Keep stderr for operator diagnostics, but never share the daemon's
+    // standard input/output streams with the child.
+    actions_ok=actions_ok &&
+        posix_spawn_file_actions_addopen(&actions,0,"/dev/null",O_RDONLY,0)==0 &&
+        posix_spawn_file_actions_addopen(&actions,1,"/dev/null",O_WRONLY,0)==0;
     posix_spawnattr_t attrs;
-    posix_spawnattr_init(&attrs);
+    bool attrs_ok=posix_spawnattr_init(&attrs)==0;
 #ifdef POSIX_SPAWN_SETSID
-    posix_spawnattr_setflags(&attrs,POSIX_SPAWN_SETSID);
+    if(attrs_ok)attrs_ok=posix_spawnattr_setflags(&attrs,POSIX_SPAWN_SETSID)==0;
+#else
+    attrs_ok=false; // Required for kill(-pid): do not run without a new session.
 #endif
+    if(!actions_ok || !attrs_ok) {
+        if(attrs_ok)posix_spawnattr_destroy(&attrs);
+        posix_spawn_file_actions_destroy(&actions);
+        close(fds[0]);close(fds[1]);cleanup();
+        return result;
+    }
     char* const args[]{
         const_cast<char*>(binary.c_str()),
         const_cast<char*>("--adapter"),
@@ -62,8 +81,18 @@ inline WorkerOutcome supervise(const std::string& binary,
         const_cast<char*>(cache.c_str()),
         nullptr
     };
+    // Deliberately do not forward HOME, credentials, proxy settings, cloud
+    // tokens, LD_* loader controls or any other daemon environment variable.
+    // Fixture opt-in is a literal test flag, never the caller's raw value.
+    const bool fixture=getenv("TRONIX_ISOLATION_FIXTURES")!=nullptr &&
+        std::strcmp(getenv("TRONIX_ISOLATION_FIXTURES"),"1")==0;
+    char env_path[]="PATH=/usr/bin:/bin";
+    char env_lang[]="LANG=C";
+    char env_lc[]="LC_ALL=C";
+    char env_fixture[]="TRONIX_ISOLATION_FIXTURES=1";
+    char* clean_env[]{env_path,env_lang,env_lc,fixture?env_fixture:nullptr,nullptr};
     pid_t pid=-1;
-    const int err=posix_spawn(&pid,binary.c_str(),&actions,&attrs,args,environ);
+    const int err=posix_spawn(&pid,binary.c_str(),&actions,&attrs,args,clean_env);
     posix_spawnattr_destroy(&attrs);
     posix_spawn_file_actions_destroy(&actions);
     close(fds[1]);

@@ -5,6 +5,8 @@
 #include <celix_bundle_context.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 #include <time.h>
 typedef struct {
@@ -17,6 +19,29 @@ static int execute(void* handle,const char* op,int64_t* value) {
     if(strcmp(op,"demo.constant")==0){*value=42;return 1;}
     if(getenv("TRONIX_ISOLATION_FIXTURES")) {
         if(strcmp(op,"demo.pid")==0){*value=getpid();return 1;}
+        // Synthetic canaries prove a worker cannot see a parent-only variable
+        // or an accidentally inheritable fd. No real secrets are accessed.
+        if(strcmp(op,"demo.no_new_privs")==0){
+            *value=prctl(PR_GET_NO_NEW_PRIVS,0,0,0,0)==1 ? 1 : 0;
+            return 1;
+        }
+        if(strcmp(op,"demo.env_clean")==0){
+            *value=getenv("TRONIX_SECRET_CANARY")==NULL ? 1 : 0;
+            return 1;
+        }
+        if(strcmp(op,"demo.fd_clean")==0){
+            *value=1;
+            for(int fd=4;fd<64;fd++){
+                char linkpath[64],target[4096];
+                snprintf(linkpath,sizeof(linkpath),"/proc/self/fd/%d",fd);
+                ssize_t n=readlink(linkpath,target,sizeof(target)-1);
+                if(n>0){
+                    target[n]=0;
+                    if(strstr(target,"tronix-fd-canary-")!=NULL){*value=0;break;}
+                }
+            }
+            return 1;
+        }
         if(strcmp(op,"demo.hang")==0){sleep(10);*value=123;return 1;}
         if(strcmp(op,"demo.crash")==0){abort();}
     }
@@ -33,7 +58,9 @@ static int lane_for(void* handle,const char* op) {
     if(strcmp(op,"demo.constant")==0)return 1;
     if(getenv("TRONIX_ISOLATION_FIXTURES") &&
        (strcmp(op,"demo.hang")==0 || strcmp(op,"demo.crash")==0 ||
-        strcmp(op,"demo.pid")==0))return 0;
+        strcmp(op,"demo.pid")==0 || strcmp(op,"demo.env_clean")==0 ||
+        strcmp(op,"demo.fd_clean")==0 ||
+        strcmp(op,"demo.no_new_privs")==0))return 0;
     if(strcmp(op,"demo.pause")==0 || strcmp(op,"demo.slow")==0 || strcmp(op,"demo.overrun")==0)return 0;
     return -1;
 }
@@ -44,14 +71,16 @@ static uint32_t budget_for(void* handle,const char* op){
     if(getenv("TRONIX_ISOLATION_FIXTURES") &&
        strcmp(op,"demo.hang")==0)return 50;
     if(getenv("TRONIX_ISOLATION_FIXTURES") && strcmp(op,"demo.crash")==0)return 1000;
-    if(getenv("TRONIX_ISOLATION_FIXTURES") && strcmp(op,"demo.pid")==0)return 1000;
+    if(getenv("TRONIX_ISOLATION_FIXTURES") && (strcmp(op,"demo.pid")==0 || strcmp(op,"demo.env_clean")==0 ||
+        strcmp(op,"demo.fd_clean")==0 ||
+        strcmp(op,"demo.no_new_privs")==0))return 1000;
     if(strcmp(op,"demo.pause")==0)return 50;
     if(strcmp(op,"demo.slow")==0)return 500;
     if(strcmp(op,"demo.overrun")==0)return 20;
     return 0;
 }
 static const char* operations(void* handle){(void)handle;return getenv("TRONIX_ISOLATION_FIXTURES")?
-        "demo.constant,demo.pause,demo.slow,demo.overrun,demo.hang,demo.crash,demo.pid":
+        "demo.constant,demo.pause,demo.slow,demo.overrun,demo.hang,demo.crash,demo.pid,demo.env_clean,demo.fd_clean,demo.no_new_privs":
         "demo.constant,demo.pause,demo.slow,demo.overrun";}
 static celix_status_t start(demo_t* d,celix_bundle_context_t* ctx) {
     memset(d,0,sizeof(*d));d->service_id=-1;
