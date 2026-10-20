@@ -8,25 +8,32 @@ scheduler. It does not implement an OpenClaw clone or a model-driven planner.
 With `--worker /absolute/path/to/tronix_worker`, each admitted operation
 executes in a new `tronix_worker` process rather than calling the operation
 bundle's `execute` function from the daemon. Scheduling, fair-share selection,
-request admission, capability listing, receipt collection and adapter **policy**
-lookup remain in the main native Celix daemon.
+request admission, receipt collection and the **cached policy snapshot**
+remain in the main native Celix daemon. **Adapter loading, initialization,
+capability enumeration and policy callbacks are in subprocesses only** when
+`--worker` is enabled.
 
-1. The scheduler claims a job; the daemon emits a `running` lifecycle record.
-2. The supervisor launches a separate executable via `posix_spawn` (no
-   multithreaded-daemon `fork`), passing only the trusted adapter path and
-   approved operation name as static process arguments.
-3. The child loads the adapter in a fresh Celix framework, checks its operation
-   authorization again, executes it and returns a fixed small MessagePack
-   response over a dedicated pipe. Startup and cleanup are part of measured
-   execution time.
-4. The parent supervises wall-clock runtime and reaps the child. The ceiling
+1. Before the daemon opens its socket, it starts a bounded inspection
+   subprocess. This child loads the reviewed Celix adapter, enumerates at most
+   16 uniquely named operations and returns their trusted lane and execution
+   budget in a strict MessagePack policy snapshot. The daemon refuses startup
+   if the policy inspection fails. This snapshot is immutable until restart.
+2. The scheduler claims a job; the daemon emits a `running` lifecycle record.
+3. The supervisor launches a separate executable via `posix_spawn` (no
+   multithreaded-daemon `fork`), passing the reviewed adapter path, allowed
+   operation, and exact **expected lane and budget** from the startup snapshot.
+4. The execution child loads the adapter in its own Celix framework, verifies
+   that the operation is still listed and the lane/budget **exactly match** the
+   startup snapshot, then executes it. Drift fails closed without executing.
+   A short bounded MessagePack result returns on a private pipe.
+5. The parent supervises wall-clock runtime and reaps the child. The ceiling
    includes a **200ms process-startup allowance** beyond the adapter's trusted
    execution budget; the recorded execution budget has no allowance.
-5. On timeout, it sends SIGKILL to the child's process group (on Linux systems
+6. On timeout, it sends SIGKILL to the child's process group (on Linux systems
    supporting POSIX_SPAWN_SETSID), kills the child directly as fallback, and
    waits for termination. The parent also cleans up the child's disposable
    Celix cache directory even if the child crashed.
-6. The existing scheduler classifies an elapsed-time excess as `overrun`
+7. The existing scheduler classifies an elapsed-time excess as `overrun`
    without exposing any success value; a faster abnormal child exit becomes
    `failed`. A subsequent queued job can execute after the failed child.
 
@@ -35,12 +42,14 @@ descriptors, 5 CPU seconds, zero core dump) and sets a parent-death signal.
 
 **Limitations:** This is **failure containment, not sandboxing**. The child
 retains the daemon's Unix UID, filesystem rights, inherited environment and
-network privileges. The reviewed adapter still gets loaded in the daemon for
-policy lookup and initial bundle activation; malicious activation/policy code
-could still affect the main process. No seccomp, namespace, cgroup, separate
-UID, or filesystem/network confinement is implemented. Child operations can
-have external side effects before being killed; timeouts do not roll them
-back. The daemon still processes one active operation at a time.
+network privileges. The main daemon does not activate the adapter when
+supervision is enabled; however **same-UID worker code is not security
+isolated**. No seccomp, namespace, cgroup, separate UID, or filesystem/network
+confinement is implemented. Local code and metadata on disk can change between
+inspection and execution; the child compares names, lanes and budgets, but
+there is no signed artifact identity or containment for same-UID processes.
+Child operations can have external side effects before being killed; timeouts
+do not roll them back. The daemon still processes one active operation at a time.
 
 The default behavior without `--worker` remains the in-process execution
 path, for backward compatibility. Do not expose a daemon or socket publicly.
@@ -101,7 +110,10 @@ required arguments). The daemon is not a production service.
 append-only lifecycle/receipt checks, the process-supervision fixture and
 memory persistence/restart tests. The supervised fixture explicitly enables
 `TRONIX_ISOLATION_FIXTURES=1` for demo-only `demo.pid`, `demo.crash`
-and `demo.hang`; these operations are not exposed by default.
+and `demo.hang`; these operations are not exposed by default. The supervised
+test also records Celix adapter activator PIDs, proves activation never
+happens inside `tronixd`, simulates policy drift, and verifies that invalid
+adapters cannot start the daemon.
 `npm run test:thread` remains an independent opt-in OpenThread simulation.
 
 Remaining reliability gaps: single-worker throughput, atomic scheduler and

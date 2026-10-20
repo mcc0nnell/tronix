@@ -54,6 +54,7 @@ struct Runtime {
     tronix::AgentMemory* memory;
     std::string worker_binary;
     std::string adapter_path;
+    std::vector<tronix::OperationPolicy> policies;
     std::atomic<bool> running{true};
     std::atomic<uint64_t> admissions{0};
     std::mutex wake_mutex;
@@ -76,7 +77,8 @@ void worker(Runtime* r){
                 // The scheduler remains native Celix; execution occurs in a
                 // new process, never on the daemon's worker thread.
                 const auto outcome=tronix::supervise(r->worker_binary,r->adapter_path,
-                                                       j.operation,j.budget_ms,r->running);
+                                                       j.operation,j.budget_ms,r->running,
+                                                       false,j.lane);
                 ok=outcome.ok;value=outcome.value;
             }else{
                 with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
@@ -206,15 +208,21 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         key(pk,"runtime");pk.pack(std::string("tronix/0.2"));
     }else if(q.action=="capabilities"){
         std::string list;
-        bool found=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
-           [&](auto* svc){if(svc->operations)list=svc->operations(svc->handle);});
+        bool found=false;
         std::vector<std::string> ops;
-        size_t pos=0;
-        while(pos<list.size()){
-            size_t end=list.find(',',pos);
-            if(end==std::string::npos)end=list.size();
-            if(end>pos)ops.emplace_back(list.substr(pos,end-pos));
-            pos=end+1;
+        if(!runtime->worker_binary.empty()){
+            found=!runtime->policies.empty();
+            for(const auto& item:runtime->policies)ops.push_back(item.name);
+        }else{
+            found=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
+               [&](auto* svc){if(svc->operations)list=svc->operations(svc->handle);});
+            size_t pos=0;
+            while(pos<list.size()){
+                size_t end=list.find(',',pos);
+                if(end==std::string::npos)end=list.size();
+                if(end>pos)ops.emplace_back(list.substr(pos,end-pos));
+                pos=end+1;
+            }
         }
         pk.pack_map(4);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(found);
         key(pk,"service");pk.pack(std::string(TRONIX_OPERATION_SERVICE));
@@ -223,11 +231,19 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
     }else if(q.action=="submit"){
         // Trusted op policy chooses priority. Never accept caller-supplied lanes.
         int lane=-1;uint32_t budget_ms=0;
-        with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
-            [&](auto* svc){
-                if(svc->lane_for)lane=svc->lane_for(svc->handle,q.operation.c_str());
-                if(svc->budget_for)budget_ms=svc->budget_for(svc->handle,q.operation.c_str());
-            });
+        if(!runtime->worker_binary.empty()){
+            // Immutable policy from the supervised startup inspection process.
+            // No adapter bundle or policy callbacks run in the main daemon.
+            for(const auto& item:runtime->policies){
+                if(item.name==q.operation){lane=item.lane;budget_ms=item.budget_ms;break;}
+            }
+        }else{
+            with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
+                [&](auto* svc){
+                    if(svc->lane_for)lane=svc->lane_for(svc->handle,q.operation.c_str());
+                    if(svc->budget_for)budget_ms=svc->budget_for(svc->handle,q.operation.c_str());
+                });
+        }
         int code=-5;
         if(runtime->ledger->durable() && (!runtime->ledger->can_admit() ||
            runtime->ledger->known(q.id))) {
@@ -437,16 +453,31 @@ int main(int argc,char** argv){
     auto* framework=celix_frameworkFactory_createFramework(cfg);
     if(!framework){std::fprintf(stderr,"Celix initialization failed\n");std::filesystem::remove_all(cache);return 3;}
     auto* ctx=celix_framework_getFrameworkContext(framework);
+    std::vector<tronix::OperationPolicy> policies;
+    if(!worker_binary.empty()){
+        const std::atomic<bool> alive{true};
+        auto description=tronix::inspect_policy(worker_binary,argv[6],alive);
+        if(!description.ok||description.policies.empty()){
+            std::fprintf(stderr,"worker policy inspection failed; refusing startup\n");
+            celix_frameworkFactory_destroyFramework(framework);
+            std::filesystem::remove_all(cache);
+            return 3;
+        }
+        policies=std::move(description.policies);
+    }
     if(celix_bundleContext_installBundle(ctx,argv[4],true)<0 ||
-       celix_bundleContext_installBundle(ctx,argv[6],true)<0){
+       (worker_binary.empty() && celix_bundleContext_installBundle(ctx,argv[6],true)<0)){
         std::fprintf(stderr,"bundle installation failed\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;
     }
     bool sch=with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,[](auto*){});
-    bool ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
+    bool ada=!worker_binary.empty() && !policies.empty();
+    if(worker_binary.empty())
+        ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
-    Runtime rt{ctx,ledger.get(),memory.get(),worker_binary,argv[6]};std::thread work(worker,&rt);
+    Runtime rt{ctx,ledger.get(),memory.get(),worker_binary,argv[6],policies};
+    std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;
     if(fd>=0){

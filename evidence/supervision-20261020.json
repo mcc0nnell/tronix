@@ -3,6 +3,7 @@
   "outcome": "PASS",
   "checks": [
     "native supervised daemon starts",
+    "adapter activation ran only in inspected child, never main daemon",
     "trusted demo fixture permits isolation checks",
     "memory coexists with journal and supervised worker",
     "raw command remains denied",
@@ -19,9 +20,13 @@
     "overrun never exposes result",
     "ledger records actual overrun",
     "demo.constant admitted",
+    "child denies policy drift from frozen admission snapshot",
+    "demo.constant admitted",
     "post-failure worker starts and completes",
     "isolated runs retain sequenced events",
-    "worker cache cleaned even after SIGKILL"
+    "supervised policy inspection refuses unloadable adapters",
+    "worker cache cleaned even after SIGKILL",
+    "policy and execution adapter activation remain out-of-process"
   ],
-  "observedTimeoutMs": 261.43266199999994
+  "observedTimeoutMs": 254.17840899999993
 }

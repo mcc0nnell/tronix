@@ -14,8 +14,10 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
 - v1 MessagePack over length-prefixed private AF_UNIX sockets. Chrome CDP remains JSON.
 - Native agent lifecycle events and receipt lookup, with opt-in owner-private
   append-only MessagePack journal for restart inspection.
-- Opt-in **supervised Celix execution workers**: one independent process per
-  trusted operation, time-bounded and reaped after success, crash or hang.
+- Opt-in **supervised Celix execution workers**: capability inspection and
+  adapter initialization run in a bounded subprocess, then approved operations
+  execute in fresh workers. Parent daemon retains only a frozen, validated
+  policy snapshot; children verify matching lane/budget before executing.
 - Opt-in durable agent key/value memory: 512 total keys, owner-private
   MessagePack append journal, bounded pagination and restart replay.
   **No arbitrary shell tools, model planner or semantic/vector memory.**
@@ -169,11 +171,11 @@ across multiple nodes are **not implemented**.
   No multi-user isolation, capability leases, browser context separation, ACLs,
   or persistent credentials. Other processes with the same Unix UID may access
   its socket and read or acknowledge other work.
-- The daemon still loads the reviewed adapter to query its authorization and
-  budget policy. Default execution also runs in-process. Opt-in `--worker`
-  moves `execute` calls out of process; neither mode is a sandbox for
-  untrusted bundle code, and the child retains the daemon's UID and network
-  privileges. Only load reviewed bundles.
+- Default execution loads the reviewed adapter in-process. Opt-in `--worker`
+  performs adapter initialization and policy inspection in subprocesses; no
+  adapter bundle is activated in the daemon. **Neither mode is a sandbox** for
+  untrusted bundle code: children retain the daemon's UID, environment and
+  network privileges. Only load reviewed bundles.
 - No crash-safe queue, transactional scheduler/journal boundary, automatic
   job replay, or OS scheduler priority. Without `--journal`, a crashed daemon
   loses its results; with a journal, it retains best-effort run receipts and

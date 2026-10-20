@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp,rm,readdir} from 'node:fs/promises';
+import {mkdtemp,rm,readdir,writeFile,readFile,unlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -10,12 +10,17 @@ const root=resolve(import.meta.dirname,'..');
 const dir=await mkdtemp(join(tmpdir(),'tronix-worker-test-'));
 const socket=join(dir,'runtime.sock'),journal=join(dir,'journal.msgpack');
 const memory=join(dir,'memory.msgpack');
+const activatorMarker=join(dir,'activator.pids');
+const driftFile=join(dir,'policy-drift.flag');
+await writeFile(activatorMarker,'',{mode:0o600});
 const oldCaches=new Set((await readdir(tmpdir())).filter(n=>n.startsWith('tronix-worker-')));
 const daemon=spawn(join(root,'build/tronixd'),[
   '--socket',socket,'--scheduler',join(root,'build/tronix_scheduler.zip'),
   '--adapter',join(root,'build/tronix_demo.zip'),'--journal',journal,
   '--worker',join(root,'build/tronix_worker'),'--memory',memory
-],{cwd:root,env:{...process.env,TRONIX_ISOLATION_FIXTURES:'1'},
+],{cwd:root,env:{...process.env,TRONIX_ISOLATION_FIXTURES:'1',
+            TRONIX_ACTIVATOR_MARKER:activatorMarker,
+            TRONIX_POLICY_DRIFT_FILE:driftFile},
    stdio:['ignore','pipe','pipe']});
 let out='',err='';
 daemon.stdout.on('data',b=>{out+=b.toString();});
@@ -41,6 +46,9 @@ try{
     await delay(10);
   }
   check('native supervised daemon starts',out.includes('TRONIX_READY'));
+  const observedPids=(await readFile(activatorMarker,'utf8')).trim().split('\n').map(Number);
+  check('adapter activation ran only in inspected child, never main daemon',
+        observedPids.length>=1 && observedPids.every(pid=>pid>0&&pid!==daemon.pid));
   const cap=await client.capabilities();
   check('trusted demo fixture permits isolation checks',
         cap.operations.includes('demo.hang')&&cap.operations.includes('demo.crash'));
@@ -68,15 +76,43 @@ try{
   check('overrun never exposes result',!Object.hasOwn(hung,'value'));
   check('ledger records actual overrun',(await client.receipt('hung')).receipt.state==='overrun');
   await client.ack('hung');
+  await writeFile(driftFile,'drift',{mode:0o600});
+  const policyDrift=await execute('drift','demo.constant');
+  check('child denies policy drift from frozen admission snapshot',
+        policyDrift.state==='failed' && !Object.hasOwn(policyDrift,'value'));
+  await client.ack('drift');
+  await unlink(driftFile);
   const after=await execute('after','demo.constant');
   check('post-failure worker starts and completes',after.state==='completed'&&after.value===42);
   await client.ack('after');
   const events=await client.events(0,16);
   check('isolated runs retain sequenced events',events.events.some(e=>e.state==='failed') &&
         events.events.some(e=>e.state==='overrun'));
+  // Invalid/unloadable adapter must never allow daemon startup.
+  const bad=spawn(join(root,'build/tronixd'),[
+    '--socket',join(dir,'invalid.sock'),
+    '--scheduler',join(root,'build/tronix_scheduler.zip'),
+    '--adapter',join(dir,'no-such-bundle.zip'),
+    '--worker',join(root,'build/tronix_worker')
+  ],{cwd:root,stdio:['ignore','pipe','pipe']});
+  let badOut='',badErr='';
+  bad.stdout.on('data',b=>badOut+=b.toString());
+  bad.stderr.on('data',b=>badErr+=b.toString());
+  const failedStartup=await Promise.race([
+    new Promise(resolve=>bad.once('close',resolve)),
+    delay(5000).then(()=>null)
+  ]);
+  if(failedStartup===null)bad.kill('SIGKILL');
+  check('supervised policy inspection refuses unloadable adapters',
+        failedStartup!==null&&failedStartup!==0 &&
+        !badOut.includes('TRONIX_READY') &&
+        badErr.includes('policy inspection failed'));
   const created=(await readdir(tmpdir())).filter(n=>
       n.startsWith('tronix-worker-')&&!oldCaches.has(n));
   check('worker cache cleaned even after SIGKILL',created.length===0);
+  const allPids=(await readFile(activatorMarker,'utf8')).trim().split('\n').map(Number);
+  check('policy and execution adapter activation remain out-of-process',
+        allPids.length>=5 && allPids.every(pid=>pid!==daemon.pid));
   console.log(JSON.stringify({schema:'tronix.supervision.v1',outcome:'PASS',checks,
     observedTimeoutMs:elapsed},null,2));
 }catch(e){
