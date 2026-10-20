@@ -55,6 +55,9 @@ int main(int argc,char** argv) {
     // A child worker may still access the host under its UID; no sandbox claim.
     if(prctl(PR_SET_PDEATHSIG,SIGKILL)!=0)return 3;
     if(getppid()==1)return 3;
+    // Drop setuid/fscaps privilege escalation even when invoked by an owner.
+    // Does not remove the UID's filesystem or network privileges.
+    if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)!=0)return 3;
     limit(RLIMIT_CORE,0);
     limit(RLIMIT_NOFILE,64);
     limit(RLIMIT_AS,1024ULL*1024*1024);
