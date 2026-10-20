@@ -130,6 +130,21 @@ and current trust boundary. See
 [docs-agent-authority.md](docs-agent-authority.md) for the optional
 UID-bound admission policy and its remaining same-UID limitations.
 
+## Proposed IHB fuzzing integration
+
+See [docs-ihb-fuzzing.md](docs-ihb-fuzzing.md) for the proposed campaign
+orchestration architecture, proposed static-profile/manifest contract, evidence
+boundary, sandbox requirements, and acceptance plan. **This is documentation
+only**: there is no `fuzz.*` Celix adapter, campaign submission API or
+IHB integration in the running Tronix service.
+
+The design keeps mutation, coverage feedback, replay and crash evidence within
+IHB. Tronix would schedule bounded *campaigns* and record execution receipts;
+Blade would make independent admission decisions and WindAnvil could verify
+provenance. The existing supervised worker's 1 GiB `RLIMIT_AS` is unsuitable
+for assuming ASan compatibility, and its same-UID execution is not a sandbox.
+Do not mount a Docker socket into `tronixd` as a workaround.
+
 ## Native lifecycle and receipts (first agent-kernel slice)
 
 The optional `--journal /absolute/private/events.mp` enables native
