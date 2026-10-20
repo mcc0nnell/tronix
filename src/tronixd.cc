@@ -1,6 +1,8 @@
 // TRONIX v0.1 — experimental Celix services + bounded MessagePack IPC.
 #include "tronix_service.h"
 #include "events.hpp"
+#include "supervisor.hpp"
+#include "memory.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
 #include <celix_framework.h>
@@ -49,6 +51,9 @@ template<class S,class F> bool with_service(celix_bundle_context_t* ctx,const ch
 struct Runtime {
     celix_bundle_context_t* ctx;
     tronix::Ledger* ledger;
+    tronix::AgentMemory* memory;
+    std::string worker_binary;
+    std::string adapter_path;
     std::atomic<bool> running{true};
     std::atomic<uint64_t> admissions{0};
     std::mutex wake_mutex;
@@ -67,8 +72,16 @@ void worker(Runtime* r){
                 std::fprintf(stderr,"TRONIX_LEDGER_ERROR running %s\n",j.id);
             int64_t value=0;int ok=0;
             const auto began=std::chrono::steady_clock::now();
-            with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
-                [&](auto* s){ok=s->execute(s->handle,j.operation,&value);});
+            if(!r->worker_binary.empty()){
+                // The scheduler remains native Celix; execution occurs in a
+                // new process, never on the daemon's worker thread.
+                const auto outcome=tronix::supervise(r->worker_binary,r->adapter_path,
+                                                       j.operation,j.budget_ms,r->running);
+                ok=outcome.ok;value=outcome.value;
+            }else{
+                with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
+                    [&](auto* s){ok=s->execute(s->handle,j.operation,&value);});
+            }
             const auto execution_ns=static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now()-began).count());
@@ -94,7 +107,7 @@ void worker(Runtime* r){
         }
     }
 }
-struct Request{std::string action,id,agent,operation;uint32_t deadline_ms=0,limit=16;uint64_t after=0;};
+struct Request{std::string action,id,agent,operation,key_name,value,after_key;uint32_t deadline_ms=0,limit=16;uint64_t after=0;};
 bool printable(const std::string& s,size_t max){
     if(s.empty()||s.size()>max)return false;
     for(unsigned char c:s)if(c<33||c>126)return false;
@@ -119,6 +132,12 @@ Request parse(const std::vector<char>& payload){
             else if(key=="id")out.id=v;
             else if(key=="agent")out.agent=v;
             else out.operation=v;
+        }else if(key=="key"||key=="value"||key=="afterKey"){
+            if(item.val.type!=msgpack::type::STR)bad("BAD_REQUEST");
+            std::string v=item.val.as<std::string>();
+            if(key=="key")out.key_name=v;
+            else if(key=="value")out.value=v;
+            else out.after_key=v;
         }else if(key=="after"){
             if(item.val.type!=msgpack::type::POSITIVE_INTEGER)bad("BAD_REQUEST");
             out.after=item.val.as<uint64_t>();
@@ -138,12 +157,27 @@ Request parse(const std::vector<char>& payload){
     const std::set<std::string> by_id={"v","action","id"};
     const std::set<std::string> simple={"v","action"};
     const std::set<std::string> event_keys={"v","action","after","limit"};
+    const std::set<std::string> memory_put={"v","action","agent","key","value"};
+    const std::set<std::string> memory_key={"v","action","agent","key"};
+    const std::set<std::string> memory_list={"v","action","agent","afterKey"};
     if(out.action=="submit"){
         if(keys!=submission||!printable(out.id,TRONIX_ID_MAX)||
            !printable(out.agent,TRONIX_AGENT_MAX)||!printable(out.operation,TRONIX_OP_MAX)||
            out.deadline_ms==0)bad("BAD_REQUEST");
     } else if(out.action=="result"||out.action=="ack"||out.action=="receipt"){
         if(keys!=by_id||!printable(out.id,TRONIX_ID_MAX))bad("BAD_REQUEST");
+    }else if(out.action=="memory_put"){
+        if(keys!=memory_put || !printable(out.agent,TRONIX_AGENT_MAX) ||
+           !printable(out.key_name,64)||out.value.empty()||out.value.size()>512)
+            bad("BAD_REQUEST");
+        for(unsigned char c:out.value)if(c<32||c>126)bad("BAD_REQUEST");
+    }else if(out.action=="memory_get"||out.action=="memory_delete"){
+        if(keys!=memory_key || !printable(out.agent,TRONIX_AGENT_MAX) ||
+           !printable(out.key_name,64))bad("BAD_REQUEST");
+    }else if(out.action=="memory_list"){
+        if(keys!=memory_list || !printable(out.agent,TRONIX_AGENT_MAX) ||
+           out.after_key.size()>64)bad("BAD_REQUEST");
+        for(unsigned char c:out.after_key)if(c<33||c>126)bad("BAD_REQUEST");
     }else if(out.action=="events"){
         if(keys!=event_keys)bad("BAD_REQUEST");
     }else if(out.action=="ping"||out.action=="snapshot"||out.action=="capabilities"){
@@ -251,6 +285,35 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         }
         pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(done!=0);
         key(pk,"state");pk.pack(std::string(done?"acked":"NOT_TERMINAL"));
+    }else if(q.action=="memory_put"||q.action=="memory_get"||
+              q.action=="memory_delete"||q.action=="memory_list"){
+        if(!runtime->memory){
+            pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(false);
+            key(pk,"error");pk.pack(std::string("MEMORY_DISABLED"));
+        }else if(q.action=="memory_put"){
+            const bool saved=runtime->memory->put(q.agent,q.key_name,q.value);
+            pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(saved);
+            key(pk,saved?"state":"error");
+            pk.pack(std::string(saved?"saved":"MEMORY_UNAVAILABLE"));
+        }else if(q.action=="memory_delete"){
+            const bool erased=runtime->memory->erase(q.agent,q.key_name);
+            pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(erased);
+            key(pk,erased?"state":"error");
+            pk.pack(std::string(erased?"deleted":"NOT_FOUND_OR_UNAVAILABLE"));
+        }else if(q.action=="memory_get"){
+            std::string value;
+            const bool found=runtime->memory->get(q.agent,q.key_name,value);
+            pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(found);
+            key(pk,found?"value":"error");
+            pk.pack(found?value:std::string("NOT_FOUND"));
+        }else{
+            auto keys=runtime->memory->keys(q.agent,q.after_key);
+            pk.pack_map(5);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
+            key(pk,"keys");pk.pack_array(static_cast<uint32_t>(keys.size()));
+            for(const auto& name:keys)pk.pack(name);
+            key(pk,"nextKey");pk.pack(keys.empty()?std::string(""):keys.back());
+            key(pk,"count");pk.pack(static_cast<uint32_t>(keys.size()));
+        }
     }else if(q.action=="receipt"){
         tronix::Event e;
         const bool found=runtime->ledger->get(q.id,e);
@@ -331,20 +394,38 @@ void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
 }
 }
 int main(int argc,char** argv){
-    if((argc!=7&&argc!=9)||std::strcmp(argv[1],"--socket")!=0||
-       std::strcmp(argv[3],"--scheduler")!=0||std::strcmp(argv[5],"--adapter")!=0||
-       (argc==9 && std::strcmp(argv[7],"--journal")!=0)){
-        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events]\n");
+    if((argc!=7&&argc!=9&&argc!=11&&argc!=13)||std::strcmp(argv[1],"--socket")!=0||
+       std::strcmp(argv[3],"--scheduler")!=0||std::strcmp(argv[5],"--adapter")!=0){
+        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem]\n");
         return 2;
     }
+    std::string journal_path,worker_binary,memory_path;
+    for(int i=7;i<argc;i+=2){
+        const std::string option=argv[i],value=argv[i+1];
+        if(option=="--journal" && journal_path.empty())journal_path=value;
+        else if(option=="--worker" && worker_binary.empty())worker_binary=value;
+        else if(option=="--memory" && memory_path.empty())memory_path=value;
+        else return 2;
+    }
+    if((!worker_binary.empty() &&
+        (worker_binary[0]!='/' || access(worker_binary.c_str(),X_OK)!=0)) ||
+       (!journal_path.empty() && journal_path[0]!='/') ||
+       (!memory_path.empty() && memory_path[0]!='/'))return 2;
     const std::string path=argv[2];
     if(path.empty()||path.size()>=sizeof(((sockaddr_un*)0)->sun_path)||path[0]!='/')return 2;
     struct stat st{};
     if(lstat(path.c_str(),&st)==0){std::fprintf(stderr,"refusing to replace existing path\n");return 2;}
     std::unique_ptr<tronix::Ledger> ledger;
-    try { ledger=std::make_unique<tronix::Ledger>(argc==9?argv[8]:""); }
+    try { ledger=std::make_unique<tronix::Ledger>(journal_path); }
     catch(const std::exception& e) {
         std::fprintf(stderr,"journal initialization failed: %s\n",e.what());
+        return 2;
+    }
+    std::unique_ptr<tronix::AgentMemory> memory;
+    try {
+        if(!memory_path.empty())memory=std::make_unique<tronix::AgentMemory>(memory_path);
+    }catch(const std::exception& e){
+        std::fprintf(stderr,"memory initialization failed: %s\n",e.what());
         return 2;
     }
     celix_properties_t* cfg=celix_properties_create();
@@ -365,7 +446,7 @@ int main(int argc,char** argv){
     bool ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
-    Runtime rt{ctx,ledger.get()};std::thread work(worker,&rt);
+    Runtime rt{ctx,ledger.get(),memory.get(),worker_binary,argv[6]};std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;
     if(fd>=0){

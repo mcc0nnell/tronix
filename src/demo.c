@@ -4,6 +4,8 @@
 #include <celix_bundle_activator.h>
 #include <celix_bundle_context.h>
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <time.h>
 typedef struct {
     long service_id;
@@ -13,6 +15,11 @@ static int execute(void* handle,const char* op,int64_t* value) {
     (void)handle;
     if(!op || !value)return 0;
     if(strcmp(op,"demo.constant")==0){*value=42;return 1;}
+    if(getenv("TRONIX_ISOLATION_FIXTURES")) {
+        if(strcmp(op,"demo.pid")==0){*value=getpid();return 1;}
+        if(strcmp(op,"demo.hang")==0){sleep(10);*value=123;return 1;}
+        if(strcmp(op,"demo.crash")==0){abort();}
+    }
     if(strcmp(op,"demo.pause")==0 || strcmp(op,"demo.slow")==0 || strcmp(op,"demo.overrun")==0) {
         struct timespec ts={.tv_sec=0,
             .tv_nsec=(strcmp(op,"demo.slow")==0 || strcmp(op,"demo.overrun")==0) ? 150000000L : 15000000L};
@@ -24,6 +31,9 @@ static int lane_for(void* handle,const char* op) {
     (void)handle;
     if(!op)return -1;
     if(strcmp(op,"demo.constant")==0)return 1;
+    if(getenv("TRONIX_ISOLATION_FIXTURES") &&
+       (strcmp(op,"demo.hang")==0 || strcmp(op,"demo.crash")==0 ||
+        strcmp(op,"demo.pid")==0))return 0;
     if(strcmp(op,"demo.pause")==0 || strcmp(op,"demo.slow")==0 || strcmp(op,"demo.overrun")==0)return 0;
     return -1;
 }
@@ -31,12 +41,18 @@ static uint32_t budget_for(void* handle,const char* op){
     (void)handle;
     if(!op)return 0;
     if(strcmp(op,"demo.constant")==0)return 1000;
+    if(getenv("TRONIX_ISOLATION_FIXTURES") &&
+       strcmp(op,"demo.hang")==0)return 50;
+    if(getenv("TRONIX_ISOLATION_FIXTURES") && strcmp(op,"demo.crash")==0)return 1000;
+    if(getenv("TRONIX_ISOLATION_FIXTURES") && strcmp(op,"demo.pid")==0)return 1000;
     if(strcmp(op,"demo.pause")==0)return 50;
     if(strcmp(op,"demo.slow")==0)return 500;
     if(strcmp(op,"demo.overrun")==0)return 20;
     return 0;
 }
-static const char* operations(void* handle){(void)handle;return "demo.constant,demo.pause,demo.slow,demo.overrun";}
+static const char* operations(void* handle){(void)handle;return getenv("TRONIX_ISOLATION_FIXTURES")?
+        "demo.constant,demo.pause,demo.slow,demo.overrun,demo.hang,demo.crash,demo.pid":
+        "demo.constant,demo.pause,demo.slow,demo.overrun";}
 static celix_status_t start(demo_t* d,celix_bundle_context_t* ctx) {
     memset(d,0,sizeof(*d));d->service_id=-1;
     d->service.handle=d;d->service.execute=execute;

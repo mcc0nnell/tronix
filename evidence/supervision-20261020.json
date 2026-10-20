@@ -1,0 +1,27 @@
+{
+  "schema": "tronix.supervision.v1",
+  "outcome": "PASS",
+  "checks": [
+    "native supervised daemon starts",
+    "trusted demo fixture permits isolation checks",
+    "memory coexists with journal and supervised worker",
+    "raw command remains denied",
+    "demo.pid admitted",
+    "Celix tool executed outside daemon PID",
+    "finished worker was reaped",
+    "demo.constant admitted",
+    "approved child result returned",
+    "demo.crash admitted",
+    "child process abort reported as failed",
+    "daemon survives adapter abort",
+    "demo.hang admitted",
+    "hung operation terminated by supervisor",
+    "overrun never exposes result",
+    "ledger records actual overrun",
+    "demo.constant admitted",
+    "post-failure worker starts and completes",
+    "isolated runs retain sequenced events",
+    "worker cache cleaned even after SIGKILL"
+  ],
+  "observedTimeoutMs": 261.43266199999994
+}

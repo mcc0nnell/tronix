@@ -1,0 +1,29 @@
+{
+  "schema": "tronix.agent-memory.v1",
+  "outcome": "PASS",
+  "checks": [
+    "owner-private memory file",
+    "missing key returns NOT_FOUND",
+    "simple memory saved",
+    "stored memory read",
+    "per-agent key separation",
+    "other agent can store same key",
+    "other agent value separate",
+    "updating value durable",
+    "untrusted parameter rejected",
+    "memory content with newline rejected",
+    "long key rejected",
+    "empty value rejected",
+    "key enumeration bounded to 16",
+    "key enumeration follows cursor",
+    "delete known key",
+    "deleted key absent",
+    "deleting unknown key fails",
+    "simultaneous memory writer refused",
+    "memory replay recovers last committed value",
+    "independent agent also survives restart",
+    "deleted key stays deleted",
+    "torn journal tail truncated",
+    "normal scheduler still functions"
+  ]
+}

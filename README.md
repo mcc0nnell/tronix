@@ -13,8 +13,12 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
 - `tronix_demo.zip`: separately packaged, registered Celix operation **service bundle**.
 - v1 MessagePack over length-prefixed private AF_UNIX sockets. Chrome CDP remains JSON.
 - Native agent lifecycle events and receipt lookup, with opt-in owner-private
-  append-only MessagePack journal for restart inspection. **No arbitrary agent
-  tools, shell execution, model loop, or prompt memory were added.**
+  append-only MessagePack journal for restart inspection.
+- Opt-in **supervised Celix execution workers**: one independent process per
+  trusted operation, time-bounded and reaped after success, crash or hang.
+- Opt-in durable agent key/value memory: 512 total keys, owner-private
+  MessagePack append journal, bounded pagination and restart replay.
+  **No arbitrary shell tools, model planner or semantic/vector memory.**
 - One event-driven dispatch worker (generation-guarded condition variable,
   no 1ms idle polling); two trusted lanes, up to 4 interactive operations
   before background progress, per-agent fair-share selection.
@@ -25,7 +29,8 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
 - Trusted adapter-defined execution budgets. On completion, the runtime accounts
   for elapsed execution and flags over-budget work as `overrun` (without returning
   its value). This is **non-preemptive**: already-performed side effects are not
-  canceled, and a hung bundle can still block the worker.
+  rolled back. In default in-process mode a hung bundle can still block the
+  worker; with `--worker`, a supervised child can be killed and reaped.
 - The synthetic adapter supports `demo.constant` -> 42, `demo.pause` -> 1 after
   15ms, `demo.slow` -> 1 after 150ms, and `demo.overrun` -> a 150ms
   operation with a trusted 20ms execution budget for regression testing.
@@ -50,7 +55,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH=/home/commander/windanvil-msgpack-work/.deps/local \
   -DCELIX_SOURCE=/home/commander/windanvil-msgpack-work/.deps/apache-celix \
   -DMSGPACK_SOURCE=/home/commander/windanvil-msgpack-work/.deps/msgpack-c
-cmake --build build --target tronixd tronix_scheduler_bundle tronix_demo_bundle -j 3
+cmake --build build --target tronixd tronix_worker tronix_scheduler_bundle tronix_demo_bundle -j 3
 npm ci --offline --ignore-scripts
 npm test
 ```
@@ -65,7 +70,9 @@ mkdir -p ./private && chmod 700 ./private
 ./build/tronixd --socket "$(pwd)/private/tronix.sock" \
   --scheduler "$(pwd)/build/tronix_scheduler.zip" \
   --adapter "$(pwd)/build/tronix_demo.zip" \
-  --journal "$(pwd)/private/events.mp"
+  --journal "$(pwd)/private/events.mp" \
+  --worker "$(pwd)/build/tronix_worker" \
+  --memory "$(pwd)/private/agent-memory.mp"
 ```
 
 `TRONIX_READY` is emitted after Celix services are registered and the local
@@ -110,6 +117,12 @@ nanoseconds. Celix service ABI **2.0.0** intentionally rejects old adapter bundl
 The optional JavaScript `TronixClient` is in `src/client.mjs`. It is an
 IPC client, **not** the execution or scheduling runtime.
 
+## Native agent-kernel slices
+
+See [docs-agent-runtime.md](docs-agent-runtime.md) for the supervised process
+mode, persistent per-agent key/value memory, failure behavior, capacity limits,
+and current trust boundary.
+
 ## Native lifecycle and receipts (first agent-kernel slice)
 
 The optional `--journal /absolute/private/events.mp` enables native
@@ -145,9 +158,10 @@ are reported to stderr, but already-admitted operations may still execute.
 Only deploy in a single-user, reviewed-bundle environment.
 
 This is the first persistent **execution** layer, not OpenClaw-equivalent
-agent orchestration. Persistent prompt/fact memory, model planning,
-execution-process isolation, authentication and event subscriptions over
-multiple nodes are **not implemented**.
+agent orchestration. The optional local key/value memory store and opt-in
+worker subprocess mode are implemented, but prompt composition, semantic
+memory, model planning, multi-user authentication, and event subscriptions
+across multiple nodes are **not implemented**.
 
 ## Security and limitations
 
@@ -155,16 +169,20 @@ multiple nodes are **not implemented**.
   No multi-user isolation, capability leases, browser context separation, ACLs,
   or persistent credentials. Other processes with the same Unix UID may access
   its socket and read or acknowledge other work.
-- Bundle code executes within the daemon's process. A hostile bundle is not
-  sandboxed. Only load reviewed bundles.
+- The daemon still loads the reviewed adapter to query its authorization and
+  budget policy. Default execution also runs in-process. Opt-in `--worker`
+  moves `execute` calls out of process; neither mode is a sandbox for
+  untrusted bundle code, and the child retains the daemon's UID and network
+  privileges. Only load reviewed bundles.
 - No crash-safe queue, transactional scheduler/journal boundary, automatic
   job replay, or OS scheduler priority. Without `--journal`, a crashed daemon
   loses its results; with a journal, it retains best-effort run receipts and
   labels unresolved runs `interrupted`.
-- Jobs are non-preemptive; queue deadlines apply to time spent waiting for
-  dispatch. Execution budgets are assessed **after** the operation returns.
-  This is a post-hoc fail-closed receipt, not an OS-level watchdog, cancellation,
-  resource isolation, rollback, or hard real-time enforcement.
+- Queue deadlines apply only to time spent waiting for dispatch. Without
+  `--worker`, execution is non-preemptive and budgets are assessed afterward.
+  With `--worker`, the supervisor terminates and reaps children whose
+  wall time exceeds the trusted budget plus 200ms startup allowance. Neither
+  mode provides rollback, a syscall sandbox or hard real-time guarantees.
 - Celix can register/unregister services, but **runtime hot-reload is not
   implemented** in this version.
 - The current event loop accepts one bounded client request at a time. It is
@@ -176,7 +194,8 @@ multiple nodes are **not implemented**.
 
 ## Verification
 
-Run `npm test` for the native smoke suite, lifecycle journal and regressions.
+Run `npm test` for the native smoke suite, lifecycle journal, worker
+supervision, durable agent memory and regressions.
 The agent-ledger test includes restart, forced crash, cursor pagination,
 scheduler expiry reconciliation, overrun receipts and single-writer locking.
 In particular,
@@ -194,9 +213,11 @@ receipts under `evidence/`.
 
 ## Next engineering milestone
 
-The next milestone is *actual* execution-time interruption/containment in a
-separate process, not merely post-hoc overrun receipts. Measure wakeup jitter,
-large-burst fairness, and backpressure on multiple systems. Add atomic scheduling/receipt transitions, identity-bound admission, and bounded-memory provenance before any
+The next milestone is **identity-bound admission and stronger worker sandboxing**
+(user namespaces, seccomp, filesystem/network restrictions), plus crash-safe
+scheduler/receipt atomicity. The optional supervised process already kills hung
+workers, but does not undo side effects. Measure wakeup jitter, large-burst
+fairness, and backpressure on multiple systems. Add atomic scheduling/receipt transitions, identity-bound admission, and bounded-memory provenance before any
 multi-user or embedded production use.
 
 
