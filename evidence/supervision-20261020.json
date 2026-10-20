@@ -1,0 +1,32 @@
+{
+  "schema": "tronix.supervision.v1",
+  "outcome": "PASS",
+  "checks": [
+    "native supervised daemon starts",
+    "adapter activation ran only in inspected child, never main daemon",
+    "trusted demo fixture permits isolation checks",
+    "memory coexists with journal and supervised worker",
+    "raw command remains denied",
+    "demo.pid admitted",
+    "Celix tool executed outside daemon PID",
+    "finished worker was reaped",
+    "demo.constant admitted",
+    "approved child result returned",
+    "demo.crash admitted",
+    "child process abort reported as failed",
+    "daemon survives adapter abort",
+    "demo.hang admitted",
+    "hung operation terminated by supervisor",
+    "overrun never exposes result",
+    "ledger records actual overrun",
+    "demo.constant admitted",
+    "child denies policy drift from frozen admission snapshot",
+    "demo.constant admitted",
+    "post-failure worker starts and completes",
+    "isolated runs retain sequenced events",
+    "supervised policy inspection refuses unloadable adapters",
+    "worker cache cleaned even after SIGKILL",
+    "policy and execution adapter activation remain out-of-process"
+  ],
+  "observedTimeoutMs": 254.17840899999993
+}

@@ -46,4 +46,8 @@ export class TronixClient {
   snapshot(){return this.request('snapshot');}
   events(after=0,limit=16){return this.request('events',{after,limit});}
   receipt(id){return this.request('receipt',{id});}
+  memoryPut(agent,key,value){return this.request('memory_put',{agent,key,value});}
+  memoryGet(agent,key){return this.request('memory_get',{agent,key});}
+  memoryDelete(agent,key){return this.request('memory_delete',{agent,key});}
+  memoryList(agent,afterKey=''){return this.request('memory_list',{agent,afterKey});}
 }

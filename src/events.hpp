@@ -187,6 +187,31 @@ public:
         }
         return out;
     }
+    // Authenticated event views use the same global sequence cursors, but
+    // never expose the other agent's payloads or terminal receipts.
+    std::vector<Event> since_agent(uint64_t after,size_t limit,
+                                   const std::string& agent)const {
+        std::lock_guard<std::mutex> l(mutex_);
+        std::vector<Event> out;
+        for(const auto& e:recent_) {
+            if(e.seq>after && e.agent==agent){
+                out.push_back(e);
+                if(out.size()==limit)break;
+            }
+        }
+        return out;
+    }
+    uint64_t oldest_agent(const std::string& agent)const {
+        std::lock_guard<std::mutex> l(mutex_);
+        for(const auto& e:recent_)if(e.agent==agent)return e.seq;
+        return 0;
+    }
+    uint64_t last_agent(const std::string& agent)const {
+        std::lock_guard<std::mutex> l(mutex_);
+        for(auto iter=recent_.rbegin();iter!=recent_.rend();++iter)
+            if(iter->agent==agent)return iter->seq;
+        return 0;
+    }
     std::vector<Event> pending()const {
         std::lock_guard<std::mutex> l(mutex_);
         std::vector<Event> out;

@@ -2,9 +2,12 @@
 
 An opt-in `--worker /absolute/path/to/tronix_worker` launches each reviewed
 Celix adapter operation in a fresh subprocess using `posix_spawn`.
-The parent daemon retains the scheduler and still loads the trusted adapter
-to run `lane_for` and `budget_for`. It sends **only** a fixed, validated
-operation name to the worker; clients cannot supply executable paths.
+The parent daemon retains the native scheduler but does NOT load the
+adapter in supervised mode. At startup, a bounded inspection child enumerates
+the reviewed operations, priorities and budgets; the daemon freezes the
+snapshot. Each execution child independently revalidates the requested
+operation and its expected priority/budget before executing. Clients cannot
+supply executable paths or arbitrary commands.
 
 ## Run on the isolated local host
 
@@ -23,8 +26,8 @@ successful child exit and strict decoding.
 ### Credential and descriptor hygiene
 
 On this Linux/glibc implementation, the supervisor does not forward the
-daemon's environment. It sends only fixed PATH and C locale settings (plus
-a literal synthetic fixture flag during tests), clears fd 4 and above using
+daemon's environment. It sends fixed PATH and C locale settings (plus
+explicit synthetic test-only fixture variables), and closes fd 4 and above using
 the glibc close-from spawn action, and points child stdin/stdout at /dev/null.
 The child retains stderr for diagnostics and the MessagePack reply pipe on
 fd 3. A worker also applies Linux NO_NEW_PRIVS to prevent gaining privileges
@@ -50,16 +53,17 @@ trusted execution budget when deciding whether to expose a successful result.
 
 ## Tested behavior
 
-The integration test covers: PID separation, authorized operation execution,
-child process crash, hung child termination, receipt preservation, completion
-of a later job, worker cache cleanup, and rejection of arbitrary commands.
+The integration test covers child-only adapter inspection, PID separation,
+policy-drift rejection, worker crash and hang termination, durable receipts,
+later work, synthetic secret/descriptor canaries and NO_NEW_PRIVS.
 The base smoke, hardening, UID-policy and ledger tests continue running.
 
 ## Security limits
 
-**Fault containment is not a hostile-code sandbox.** The daemon still loads
-native adapter code for admission policy and workers still use the daemon's
-UID, filesystem and network permissions, though the worker's inherited
+**Fault containment is not a hostile-code sandbox.** In supervised mode,
+adapter policy inspection and execution run in children, not in the daemon.
+Workers still use the daemon's UID, filesystem and network permissions,
+though the worker's inherited
 environment and unrelated descriptors are stripped. A malicious same-UID
 worker can still access permitted files and potentially inspect processes.
 Resource limits and SIGKILL cannot undo completed side effects or reliably

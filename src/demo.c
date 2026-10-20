@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 #include <time.h>
@@ -19,25 +20,20 @@ static int execute(void* handle,const char* op,int64_t* value) {
     if(strcmp(op,"demo.constant")==0){*value=42;return 1;}
     if(getenv("TRONIX_ISOLATION_FIXTURES")) {
         if(strcmp(op,"demo.pid")==0){*value=getpid();return 1;}
-        // Synthetic canaries prove a worker cannot see a parent-only variable
-        // or an accidentally inheritable fd. No real secrets are accessed.
         if(strcmp(op,"demo.no_new_privs")==0){
-            *value=prctl(PR_GET_NO_NEW_PRIVS,0,0,0,0)==1 ? 1 : 0;
-            return 1;
+            *value=prctl(PR_GET_NO_NEW_PRIVS,0,0,0,0)==1?1:0;return 1;
         }
         if(strcmp(op,"demo.env_clean")==0){
-            *value=getenv("TRONIX_SECRET_CANARY")==NULL ? 1 : 0;
-            return 1;
+            *value=getenv("TRONIX_SECRET_CANARY")==NULL?1:0;return 1;
         }
         if(strcmp(op,"demo.fd_clean")==0){
             *value=1;
             for(int fd=4;fd<64;fd++){
-                char linkpath[64],target[4096];
-                snprintf(linkpath,sizeof(linkpath),"/proc/self/fd/%d",fd);
-                ssize_t n=readlink(linkpath,target,sizeof(target)-1);
-                if(n>0){
-                    target[n]=0;
-                    if(strstr(target,"tronix-fd-canary-")!=NULL){*value=0;break;}
+                char path[64],target[4096];
+                snprintf(path,sizeof(path),"/proc/self/fd/%d",fd);
+                const ssize_t n=readlink(path,target,sizeof(target)-1);
+                if(n>0){target[n]=0;
+                    if(strstr(target,"tronix-fd-canary-")){*value=0;break;}
                 }
             }
             return 1;
@@ -67,13 +63,18 @@ static int lane_for(void* handle,const char* op) {
 static uint32_t budget_for(void* handle,const char* op){
     (void)handle;
     if(!op)return 0;
-    if(strcmp(op,"demo.constant")==0)return 1000;
+    if(strcmp(op,"demo.constant")==0){
+        // Fixture only: emulate policy changing after startup inspection.
+        if(getenv("TRONIX_ISOLATION_FIXTURES") && getenv("TRONIX_POLICY_DRIFT_FILE") &&
+           access(getenv("TRONIX_POLICY_DRIFT_FILE"),F_OK)==0)return 1100;
+        return 1000;
+    }
     if(getenv("TRONIX_ISOLATION_FIXTURES") &&
        strcmp(op,"demo.hang")==0)return 50;
     if(getenv("TRONIX_ISOLATION_FIXTURES") && strcmp(op,"demo.crash")==0)return 1000;
-    if(getenv("TRONIX_ISOLATION_FIXTURES") && (strcmp(op,"demo.pid")==0 || strcmp(op,"demo.env_clean")==0 ||
-        strcmp(op,"demo.fd_clean")==0 ||
-        strcmp(op,"demo.no_new_privs")==0))return 1000;
+    if(getenv("TRONIX_ISOLATION_FIXTURES") && (strcmp(op,"demo.pid")==0 ||
+       strcmp(op,"demo.env_clean")==0 || strcmp(op,"demo.fd_clean")==0 ||
+       strcmp(op,"demo.no_new_privs")==0))return 1000;
     if(strcmp(op,"demo.pause")==0)return 50;
     if(strcmp(op,"demo.slow")==0)return 500;
     if(strcmp(op,"demo.overrun")==0)return 20;
@@ -84,6 +85,18 @@ static const char* operations(void* handle){(void)handle;return getenv("TRONIX_I
         "demo.constant,demo.pause,demo.slow,demo.overrun";}
 static celix_status_t start(demo_t* d,celix_bundle_context_t* ctx) {
     memset(d,0,sizeof(*d));d->service_id=-1;
+    if(getenv("TRONIX_ISOLATION_FIXTURES") && getenv("TRONIX_ACTIVATOR_MARKER")){
+        const char* path=getenv("TRONIX_ACTIVATOR_MARKER");
+        int fd=open(path,O_WRONLY|O_APPEND|O_CLOEXEC|O_NOFOLLOW);
+        if(fd>=0){
+            char line[32];const int len=snprintf(line,sizeof(line),"%ld\n",(long)getpid());
+            if(len>0 && len<(int)sizeof(line)){
+                const ssize_t written=write(fd,line,(size_t)len);
+                (void)written;
+            }
+            close(fd);
+        }
+    }
     d->service.handle=d;d->service.execute=execute;
     d->service.lane_for=lane_for;d->service.budget_for=budget_for;
     d->service.operations=operations;

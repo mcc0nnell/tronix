@@ -1,8 +1,10 @@
 // TRONIX v0.1 — experimental Celix services + bounded MessagePack IPC.
 #include "tronix_service.h"
 #include "events.hpp"
-#include "peer_policy.hpp"
 #include "supervisor.hpp"
+#include "memory.hpp"
+#include "authority.hpp"
+#include "peer_policy.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
 #include <celix_framework.h>
@@ -30,6 +32,7 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -51,9 +54,12 @@ template<class S,class F> bool with_service(celix_bundle_context_t* ctx,const ch
 struct Runtime {
     celix_bundle_context_t* ctx;
     tronix::Ledger* ledger;
+    tronix::AgentMemory* memory;
+    const tronix::Authority* authority;
     const tronix::PeerPolicy* policy;
     std::string worker_binary;
     std::string adapter_path;
+    std::vector<tronix::OperationPolicy> policies;
     std::atomic<bool> running{true};
     std::atomic<uint64_t> admissions{0};
     std::mutex wake_mutex;
@@ -72,13 +78,14 @@ void worker(Runtime* r){
                 std::fprintf(stderr,"TRONIX_LEDGER_ERROR running %s\n",j.id);
             int64_t value=0;int ok=0;
             const auto began=std::chrono::steady_clock::now();
-            if(!r->worker_binary.empty()) {
-                // Fresh executable, never fork() a live Celix framework.
+            if(!r->worker_binary.empty()){
+                // The scheduler remains native Celix; execution occurs in a
+                // new process, never on the daemon's worker thread.
                 const auto outcome=tronix::supervise(r->worker_binary,r->adapter_path,
-                                                      j.operation,j.budget_ms,r->running);
-                ok=outcome.ok;
-                value=outcome.value;
-            } else {
+                                                       j.operation,j.budget_ms,r->running,
+                                                       false,j.lane);
+                ok=outcome.ok;value=outcome.value;
+            }else{
                 with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
                     [&](auto* s){ok=s->execute(s->handle,j.operation,&value);});
             }
@@ -107,7 +114,7 @@ void worker(Runtime* r){
         }
     }
 }
-struct Request{std::string action,id,agent,operation;uint32_t deadline_ms=0,limit=16;uint64_t after=0;};
+struct Request{std::string action,id,agent,operation,key_name,value,after_key;uint32_t deadline_ms=0,limit=16;uint64_t after=0;};
 bool printable(const std::string& s,size_t max){
     if(s.empty()||s.size()>max)return false;
     for(unsigned char c:s)if(c<33||c>126)return false;
@@ -132,6 +139,12 @@ Request parse(const std::vector<char>& payload){
             else if(key=="id")out.id=v;
             else if(key=="agent")out.agent=v;
             else out.operation=v;
+        }else if(key=="key"||key=="value"||key=="afterKey"){
+            if(item.val.type!=msgpack::type::STR)bad("BAD_REQUEST");
+            std::string v=item.val.as<std::string>();
+            if(key=="key")out.key_name=v;
+            else if(key=="value")out.value=v;
+            else out.after_key=v;
         }else if(key=="after"){
             if(item.val.type!=msgpack::type::POSITIVE_INTEGER)bad("BAD_REQUEST");
             out.after=item.val.as<uint64_t>();
@@ -151,12 +164,27 @@ Request parse(const std::vector<char>& payload){
     const std::set<std::string> by_id={"v","action","id"};
     const std::set<std::string> simple={"v","action"};
     const std::set<std::string> event_keys={"v","action","after","limit"};
+    const std::set<std::string> memory_put={"v","action","agent","key","value"};
+    const std::set<std::string> memory_key={"v","action","agent","key"};
+    const std::set<std::string> memory_list={"v","action","agent","afterKey"};
     if(out.action=="submit"){
         if(keys!=submission||!printable(out.id,TRONIX_ID_MAX)||
            !printable(out.agent,TRONIX_AGENT_MAX)||!printable(out.operation,TRONIX_OP_MAX)||
            out.deadline_ms==0)bad("BAD_REQUEST");
     } else if(out.action=="result"||out.action=="ack"||out.action=="receipt"){
         if(keys!=by_id||!printable(out.id,TRONIX_ID_MAX))bad("BAD_REQUEST");
+    }else if(out.action=="memory_put"){
+        if(keys!=memory_put || !printable(out.agent,TRONIX_AGENT_MAX) ||
+           !printable(out.key_name,64)||out.value.empty()||out.value.size()>512)
+            bad("BAD_REQUEST");
+        for(unsigned char c:out.value)if(c<32||c>126)bad("BAD_REQUEST");
+    }else if(out.action=="memory_get"||out.action=="memory_delete"){
+        if(keys!=memory_key || !printable(out.agent,TRONIX_AGENT_MAX) ||
+           !printable(out.key_name,64))bad("BAD_REQUEST");
+    }else if(out.action=="memory_list"){
+        if(keys!=memory_list || !printable(out.agent,TRONIX_AGENT_MAX) ||
+           out.after_key.size()>64)bad("BAD_REQUEST");
+        for(unsigned char c:out.after_key)if(c<33||c>126)bad("BAD_REQUEST");
     }else if(out.action=="events"){
         if(keys!=event_keys)bad("BAD_REQUEST");
     }else if(out.action=="ping"||out.action=="snapshot"||out.action=="capabilities"){
@@ -178,47 +206,88 @@ void pack_event(P& pk,const tronix::Event& e) {
     key(pk,"kind");pk.pack(std::string("agent.lifecycle"));
     if(e.has_value){key(pk,"value");pk.pack(e.value);}
 }
-std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime){
+std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime,
+                  const tronix::Identity* caller){
+    // The caller is the verified Linux peer UID's frozen policy, not a
+    // user-supplied agent label. Null means the legacy unauthenticated mode.
+    const bool restricted=runtime->authority!=nullptr;
+    auto denied=[&](const std::string& error)->std::string{
+        msgpack::sbuffer b;P pk(b);pk.pack_map(3);
+        key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(false);
+        key(pk,"error");pk.pack(error);
+        return std::string(b.data(),b.size());
+    };
+    if(restricted && !caller)return denied("DENIED");
+    if(restricted &&
+       (q.action=="submit" || q.action=="memory_put" ||
+        q.action=="memory_get" || q.action=="memory_delete" ||
+        q.action=="memory_list") && q.agent!=caller->agent)
+        return denied("DENIED");
+    if(restricted && q.action=="submit" && !caller->allows(q.operation))
+        return denied("DENIED");
+    if(restricted && q.action=="snapshot")
+        return denied("DENIED");
+    // Legacy single-UID peer-policy mode remains supported for #1 clients.
+    // --authority and --policy are mutually exclusive by startup policy.
+    if(runtime->policy &&
+       (q.action=="submit" || q.action=="memory_put" ||
+        q.action=="memory_get" || q.action=="memory_delete" ||
+        q.action=="memory_list") &&
+       q.agent!=runtime->policy->principal())
+        return denied("UNAUTHORIZED");
+    if(runtime->policy && q.action=="submit" &&
+       !runtime->policy->permits(q.operation))
+        return denied("DENIED");
     msgpack::sbuffer b;P pk(b);
     if(q.action=="ping"){
         pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
         key(pk,"runtime");pk.pack(std::string("tronix/0.2"));
     }else if(q.action=="capabilities"){
         std::string list;
-        bool found=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
-           [&](auto* svc){if(svc->operations)list=svc->operations(svc->handle);});
+        bool found=false;
         std::vector<std::string> ops;
-        size_t pos=0;
-        while(pos<list.size()){
-            size_t end=list.find(',',pos);
-            if(end==std::string::npos)end=list.size();
-            if(end>pos) {
-                std::string op=list.substr(pos,end-pos);
-                if(!runtime->policy || runtime->policy->permits(op)) ops.push_back(std::move(op));
+        if(!runtime->worker_binary.empty()){
+            found=!runtime->policies.empty();
+            for(const auto& item:runtime->policies)ops.push_back(item.name);
+        }else{
+            found=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
+               [&](auto* svc){if(svc->operations)list=svc->operations(svc->handle);});
+            size_t pos=0;
+            while(pos<list.size()){
+                size_t end=list.find(',',pos);
+                if(end==std::string::npos)end=list.size();
+                if(end>pos)ops.emplace_back(list.substr(pos,end-pos));
+                pos=end+1;
             }
-            pos=end+1;
+        }
+        if(restricted || runtime->policy){
+            std::vector<std::string> permitted;
+            for(const auto& op:ops)
+                if((!restricted || caller->allows(op)) &&
+                   (!runtime->policy || runtime->policy->permits(op)))
+                    permitted.push_back(op);
+            ops=std::move(permitted);
         }
         pk.pack_map(4);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(found);
         key(pk,"service");pk.pack(std::string(TRONIX_OPERATION_SERVICE));
         key(pk,"operations");pk.pack_array(static_cast<uint32_t>(ops.size()));
         for(const auto& op:ops)pk.pack(op);
     }else if(q.action=="submit"){
-        // Strict mode is one Unix principal: no forged agent
-        // label or unlisted operation can reach the scheduler.
-        if(runtime->policy && (q.agent!=runtime->policy->principal() ||
-                               !runtime->policy->permits(q.operation))) {
-            pk.pack_map(4);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(false);
-            key(pk,"id");pk.pack(q.id);key(pk,"error");
-            pk.pack(std::string(q.agent!=runtime->policy->principal()?"UNAUTHORIZED":"DENIED"));
-            return std::string(b.data(),b.size());
-        }
         // Trusted op policy chooses priority. Never accept caller-supplied lanes.
         int lane=-1;uint32_t budget_ms=0;
-        with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
-            [&](auto* svc){
-                if(svc->lane_for)lane=svc->lane_for(svc->handle,q.operation.c_str());
-                if(svc->budget_for)budget_ms=svc->budget_for(svc->handle,q.operation.c_str());
-            });
+        if(!runtime->worker_binary.empty()){
+            // Immutable policy from the supervised startup inspection process.
+            // No adapter bundle or policy callbacks run in the main daemon.
+            for(const auto& item:runtime->policies){
+                if(item.name==q.operation){lane=item.lane;budget_ms=item.budget_ms;break;}
+            }
+        }else{
+            with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,
+                [&](auto* svc){
+                    if(svc->lane_for)lane=svc->lane_for(svc->handle,q.operation.c_str());
+                    if(svc->budget_for)budget_ms=svc->budget_for(svc->handle,q.operation.c_str());
+                });
+        }
         int code=-5;
         if(runtime->ledger->durable() && (!runtime->ledger->can_admit() ||
            runtime->ledger->known(q.id))) {
@@ -247,6 +316,8 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         tronix_job_t j{};int found=0;
         with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
             [&](auto* s){found=s->lookup(s->handle,q.id.c_str(),&j);});
+        if(found && restricted && std::string(j.agent)!=caller->agent)
+            found=0; // Do not reveal another agent's job ID or state.
         if(found && j.state==TRONIX_EXPIRED)
             runtime->ledger->emit(j.id,j.agent,j.operation,"expired",j.dispatch_seq);
         pk.pack_map(found?(j.state==TRONIX_DONE?9:8):5);
@@ -267,8 +338,10 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
             [&](auto* s){s->lookup(s->handle,q.id.c_str(),&prior);});
         int done=0;
-        with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
-            [&](auto* s){done=s->ack(s->handle,q.id.c_str());});
+        if(!restricted || (prior.state && std::string(prior.agent)==caller->agent)){
+            with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,
+                [&](auto* s){done=s->ack(s->handle,q.id.c_str());});
+        }
         if(done && prior.state) {
             if(prior.state==TRONIX_EXPIRED)
                 runtime->ledger->emit(prior.id,prior.agent,prior.operation,"expired",prior.dispatch_seq);
@@ -276,9 +349,39 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
         }
         pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(done!=0);
         key(pk,"state");pk.pack(std::string(done?"acked":"NOT_TERMINAL"));
+    }else if(q.action=="memory_put"||q.action=="memory_get"||
+              q.action=="memory_delete"||q.action=="memory_list"){
+        if(!runtime->memory){
+            pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(false);
+            key(pk,"error");pk.pack(std::string("MEMORY_DISABLED"));
+        }else if(q.action=="memory_put"){
+            const bool saved=runtime->memory->put(q.agent,q.key_name,q.value);
+            pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(saved);
+            key(pk,saved?"state":"error");
+            pk.pack(std::string(saved?"saved":"MEMORY_UNAVAILABLE"));
+        }else if(q.action=="memory_delete"){
+            const bool erased=runtime->memory->erase(q.agent,q.key_name);
+            pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(erased);
+            key(pk,erased?"state":"error");
+            pk.pack(std::string(erased?"deleted":"NOT_FOUND_OR_UNAVAILABLE"));
+        }else if(q.action=="memory_get"){
+            std::string value;
+            const bool found=runtime->memory->get(q.agent,q.key_name,value);
+            pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(found);
+            key(pk,found?"value":"error");
+            pk.pack(found?value:std::string("NOT_FOUND"));
+        }else{
+            auto keys=runtime->memory->keys(q.agent,q.after_key);
+            pk.pack_map(5);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
+            key(pk,"keys");pk.pack_array(static_cast<uint32_t>(keys.size()));
+            for(const auto& name:keys)pk.pack(name);
+            key(pk,"nextKey");pk.pack(keys.empty()?std::string(""):keys.back());
+            key(pk,"count");pk.pack(static_cast<uint32_t>(keys.size()));
+        }
     }else if(q.action=="receipt"){
         tronix::Event e;
-        const bool found=runtime->ledger->get(q.id,e);
+        const bool exists=runtime->ledger->get(q.id,e);
+        const bool found=exists && (!restricted || e.agent==caller->agent);
         pk.pack_map(found?4:3);key(pk,"v");pk.pack(1);
         key(pk,"ok");pk.pack(found);
         if(found){key(pk,"receipt");pack_event(pk,e);key(pk,"persisted");pk.pack(runtime->ledger->durable());}
@@ -293,12 +396,16 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime)
             if(found && j.state==TRONIX_EXPIRED)
                 runtime->ledger->emit(j.id,j.agent,j.operation,"expired",j.dispatch_seq);
         }
-        auto ev=runtime->ledger->since(q.after,q.limit);
-        auto oldest=runtime->ledger->oldest();
+        auto ev=restricted?runtime->ledger->since_agent(q.after,q.limit,caller->agent):
+                           runtime->ledger->since(q.after,q.limit);
+        auto oldest=restricted?runtime->ledger->oldest_agent(caller->agent):
+                               runtime->ledger->oldest();
+        auto latest=restricted?runtime->ledger->last_agent(caller->agent):
+                               runtime->ledger->last();
         pk.pack_map(7);
         key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
         key(pk,"oldestSeq");pk.pack(oldest);
-        key(pk,"lastSeq");pk.pack(runtime->ledger->last());
+        key(pk,"lastSeq");pk.pack(latest);
         key(pk,"truncated");pk.pack(oldest>0 && q.after<oldest-1);
         key(pk,"persisted");pk.pack(runtime->ledger->durable());
         key(pk,"events");pk.pack_array(static_cast<uint32_t>(ev.size()));
@@ -343,28 +450,29 @@ void send_frame(int fd,const std::string& bytes){
     if(exact_send(fd,&n,4))exact_send(fd,bytes.data(),bytes.size());
 }
 void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
-    if(runtime->policy) {
-        // SO_PEERCRED is kernel-provided at AF_UNIX connection establishment.
-        // MessagePack fields cannot override the actual peer UID.
-#ifdef __linux__
-        struct ucred peer{};
-        socklen_t peer_len=sizeof(peer);
-        if(::getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&peer,&peer_len)!=0 ||
-           peer_len!=sizeof(peer) || peer.uid!=runtime->policy->uid()) {
+    const tronix::Identity* caller=nullptr;
+    if(runtime->authority || runtime->policy){
+#ifdef SO_PEERCRED
+        struct ucred cred{};
+        socklen_t credlen=sizeof(cred);
+        if(getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&cred,&credlen)!=0 ||
+           credlen!=sizeof(cred))return; // Fail closed when kernel credentials unavailable.
+        if(runtime->policy && cred.uid!=runtime->policy->uid()){
             msgpack::sbuffer b;P pk(b);pk.pack_map(3);
             key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(false);
             key(pk,"error");pk.pack(std::string("UNAUTHORIZED"));
             send_frame(fd,std::string(b.data(),b.size()));
             return;
         }
+        if(runtime->authority)caller=runtime->authority->lookup(cred.uid);
 #else
-        return;
+        return; // This experimental authority only supports Linux peer credentials.
 #endif
     }
     uint32_t wire=0;if(!exact_read(fd,&wire,4))return;
     uint32_t len=ntohl(wire);if(len==0||len>MAX_FRAME)return;
     std::vector<char> bytes(len);if(!exact_read(fd,bytes.data(),len))return;
-    try{send_frame(fd,reply(ctx,parse(bytes),runtime));}
+    try{send_frame(fd,reply(ctx,parse(bytes),runtime,caller));}
     catch(const std::exception& e){
         msgpack::sbuffer b;P pk(b);pk.pack_map(3);key(pk,"v");pk.pack(1);
         key(pk,"ok");pk.pack(false);key(pk,"error");
@@ -374,38 +482,57 @@ void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
 }
 }
 int main(int argc,char** argv){
-    if(argc<7 || (argc-7)%2!=0 || std::strcmp(argv[1],"--socket")!=0 ||
-       std::strcmp(argv[3],"--scheduler")!=0 || std::strcmp(argv[5],"--adapter")!=0) {
-        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--policy PRIVATE.policy] [--worker ABSOLUTE.EXE]\n");
+    if((argc!=7&&argc!=9&&argc!=11&&argc!=13&&argc!=15)||std::strcmp(argv[1],"--socket")!=0||
+       std::strcmp(argv[3],"--scheduler")!=0||std::strcmp(argv[5],"--adapter")!=0){
+        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy] [--policy PRIVATE.policy]\n");
         return 2;
     }
-    std::string journal_path,policy_path,worker_binary;
-    for(int i=7;i<argc;i+=2) {
-        const std::string option=argv[i];
-        if(option=="--journal" && journal_path.empty() && argv[i+1][0])
-            journal_path=argv[i+1];
-        else if(option=="--policy" && policy_path.empty() && argv[i+1][0])
-            policy_path=argv[i+1];
-        else if(option=="--worker" && worker_binary.empty() && argv[i+1][0])
-            worker_binary=argv[i+1];
-        else {std::fprintf(stderr,"unexpected or duplicate argument\n");return 2;}
+    std::string journal_path,worker_binary,memory_path,authority_path,policy_path;
+    for(int i=7;i<argc;i+=2){
+        const std::string option=argv[i],value=argv[i+1];
+        if(option=="--journal" && journal_path.empty())journal_path=value;
+        else if(option=="--worker" && worker_binary.empty())worker_binary=value;
+        else if(option=="--memory" && memory_path.empty())memory_path=value;
+        else if(option=="--authority" && authority_path.empty())authority_path=value;
+        else if(option=="--policy" && policy_path.empty())policy_path=value;
+        else return 2;
     }
-    // The executable is selected only by the daemon operator, never a client.
-    // Refuse non-absolute or nonexistent workers at startup.
-    if(!worker_binary.empty() &&
-       (worker_binary[0]!='/' || access(worker_binary.c_str(),X_OK)!=0))return 2;
+    if(!authority_path.empty() && !policy_path.empty())return 2;
+    if((!worker_binary.empty() &&
+        (worker_binary[0]!='/' || access(worker_binary.c_str(),X_OK)!=0)) ||
+       (!journal_path.empty() && journal_path[0]!='/') ||
+       (!memory_path.empty() && memory_path[0]!='/') ||
+       (!authority_path.empty() && authority_path[0]!='/') ||
+       (!policy_path.empty() && policy_path[0]!='/'))return 2;
     const std::string path=argv[2];
     if(path.empty()||path.size()>=sizeof(((sockaddr_un*)0)->sun_path)||path[0]!='/')return 2;
     struct stat st{};
     if(lstat(path.c_str(),&st)==0){std::fprintf(stderr,"refusing to replace existing path\n");return 2;}
-    std::unique_ptr<tronix::Ledger> ledger;
+    std::unique_ptr<tronix::Authority> authority;
+    try {
+        if(!authority_path.empty())authority=std::make_unique<tronix::Authority>(authority_path);
+    }catch(const std::exception& e){
+        std::fprintf(stderr,"authority initialization failed: %s\n",e.what());
+        return 2;
+    }
     std::unique_ptr<tronix::PeerPolicy> policy;
     try {
         if(!policy_path.empty())policy=std::make_unique<tronix::PeerPolicy>(policy_path);
-        ledger=std::make_unique<tronix::Ledger>(journal_path);
+    }catch(const std::exception& e){
+        std::fprintf(stderr,"policy initialization failed: %s\n",e.what());
+        return 2;
     }
+    std::unique_ptr<tronix::Ledger> ledger;
+    try { ledger=std::make_unique<tronix::Ledger>(journal_path); }
     catch(const std::exception& e) {
-        std::fprintf(stderr,"policy/journal initialization failed: %s\n",e.what());
+        std::fprintf(stderr,"journal initialization failed: %s\n",e.what());
+        return 2;
+    }
+    std::unique_ptr<tronix::AgentMemory> memory;
+    try {
+        if(!memory_path.empty())memory=std::make_unique<tronix::AgentMemory>(memory_path);
+    }catch(const std::exception& e){
+        std::fprintf(stderr,"memory initialization failed: %s\n",e.what());
         return 2;
     }
     celix_properties_t* cfg=celix_properties_create();
@@ -417,16 +544,31 @@ int main(int argc,char** argv){
     auto* framework=celix_frameworkFactory_createFramework(cfg);
     if(!framework){std::fprintf(stderr,"Celix initialization failed\n");std::filesystem::remove_all(cache);return 3;}
     auto* ctx=celix_framework_getFrameworkContext(framework);
+    std::vector<tronix::OperationPolicy> policies;
+    if(!worker_binary.empty()){
+        const std::atomic<bool> alive{true};
+        auto description=tronix::inspect_policy(worker_binary,argv[6],alive);
+        if(!description.ok||description.policies.empty()){
+            std::fprintf(stderr,"worker policy inspection failed; refusing startup\n");
+            celix_frameworkFactory_destroyFramework(framework);
+            std::filesystem::remove_all(cache);
+            return 3;
+        }
+        policies=std::move(description.policies);
+    }
     if(celix_bundleContext_installBundle(ctx,argv[4],true)<0 ||
-       celix_bundleContext_installBundle(ctx,argv[6],true)<0){
+       (worker_binary.empty() && celix_bundleContext_installBundle(ctx,argv[6],true)<0)){
         std::fprintf(stderr,"bundle installation failed\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;
     }
     bool sch=with_service<tronix_scheduler_service_t>(ctx,TRONIX_SCHEDULER_SERVICE,[](auto*){});
-    bool ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
+    bool ada=!worker_binary.empty() && !policies.empty();
+    if(worker_binary.empty())
+        ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
-    Runtime rt{ctx,ledger.get(),policy.get(),worker_binary,argv[6]};std::thread work(worker,&rt);
+    Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),policy.get(),worker_binary,argv[6],policies};
+    std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;
     if(fd>=0){
