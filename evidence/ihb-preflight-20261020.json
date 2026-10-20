@@ -34,6 +34,19 @@
     "result": "PASS",
     "schema": "tronix.ihb-preflight-acceptance.v0"
   },
+  "mainline_reconciliation": {
+    "base_sha": "88f1ea6",
+    "combined_build": "PASS",
+    "existing_npm_regressions": "PASS",
+    "focused_9_unit_13_integration": "PASS",
+    "merged_build_log_sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+    "merged_existing_suite_log_sha256": "11e30a2cebd78267b0d7a5fc433a52b8226042be7158587e4351d20ca52dedfc",
+    "merged_focused_log_sha256": "fd672ce5d96524966488f7cf2bdfac60637fadcc9f0e1bb20b4719725ca28455",
+    "preserved_targets": [
+      "tronix_ihb_preflight",
+      "tronix_lightpanda_record"
+    ]
+  },
   "original_tronix_regressions": {
     "log_sha256": "639ae18e7e461035183a669c7f28ad3fea9f5ea8014585699126337efb6efe38",
     "result": "PASS"
