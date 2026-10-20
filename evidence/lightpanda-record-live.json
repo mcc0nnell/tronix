@@ -1,0 +1,44 @@
+{
+  "schema": "tronix.browser-workflow-live.v1",
+  "status": "PASS",
+  "checks": [
+    "incorrect executable digest rejected before socket binding",
+    "incorrect Agent Bridge revision rejected before socket binding",
+    "private workflow socket",
+    "only record and replay advertised",
+    "denied browser.navigate",
+    "denied Runtime.evaluate",
+    "denied browser.constant",
+    "denied browser.click",
+    "accepted replay-before-record",
+    "replay-before-record fails closed",
+    "accepted record-1",
+    "record completed through native Celix",
+    "record stored one sanitized receipt",
+    "record excludes raw page text",
+    "accepted replay-1",
+    "native replay succeeded",
+    "matching replay receipt has parent and steps",
+    "accepted replay-changed",
+    "changed fixture fails hash comparison",
+    "mismatch retained a FAIL receipt",
+    "accepted replay-tampered",
+    "tampered source receipt rejected",
+    "all jobs accounted and native queue drained",
+    "journal enabled for native execution receipts"
+  ],
+  "limitations": [
+    "Loopback fixture only; no arbitrary agent URL/JS or external site",
+    "Receipts use unkeyed local SHA-256, not third-party attestation",
+    "No multi-tenant sandbox or production credential isolation"
+  ],
+  "record_id": "3173ec888f5f4ed2aac569fcc134d386",
+  "metrics": {
+    "completed": 2,
+    "failed": 3,
+    "receipts": 3,
+    "verified_steps": 3
+  },
+  "binary_sha256": "ca0f81ef297935bf281e99d92849d5bdce3661563fa6e0cf6e954b24e41ff359",
+  "agent_bridge_revision": "5874ac960959b2ee5f449820cac9dcd83a146dcb"
+}
