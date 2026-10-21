@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 /* Deliberately restricted demo adapter; no user-provided commands or scripts. */
 #define _POSIX_C_SOURCE 200809L
 #include "tronix_service.h"

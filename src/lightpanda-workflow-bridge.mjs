@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Bounded adapter connecting native Tronix operations to the existing
 // mcc0nnell/lightpanda-agent-bridge's real CDP recorder and replayer.
 // Uses one trusted, static, loopback fixture. No caller-provided browser args.

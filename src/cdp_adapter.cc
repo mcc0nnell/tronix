@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // First native Celix/CDP operation adapter. No browser script, URL or raw CDP method input.
 // MessagePack only between this bundle and a trusted, owned-target fixture bridge.
 #include "tronix_service.h"

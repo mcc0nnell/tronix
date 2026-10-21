@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Optional Node client for the native Tronix MessagePack v1 wire protocol.
 import net from 'node:net';
 import {encode,decode} from '@msgpack/msgpack';

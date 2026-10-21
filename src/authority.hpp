@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Optional Linux peer-UID authority for private Tronix AF_UNIX socket.
 // Binds each authorized UID to exactly one agent label and an allowlist.
 // This is NOT same-UID process isolation or multi-user socket provisioning.

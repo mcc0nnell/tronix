@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <stdint.h>
 #ifdef __cplusplus
