@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Local-only, read-only telemetry from two real OpenThread POSIX simulated nodes.
 // No arbitrary commands, addresses, network keys, or user-supplied scripts accepted.
 import net from 'node:net';

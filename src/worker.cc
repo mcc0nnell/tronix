@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // TRONIX opt-in one-shot Celix operation worker.
 // This is fault and timeout containment, NOT a security sandbox.
 #include "tronix_service.h"

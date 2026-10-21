@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Read-only OpenThread telemetry adapter. Never accepts arbitrary CLI commands.
 #include "tronix_service.h"
 #include <celix_bundle_activator.h>
