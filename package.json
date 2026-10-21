@@ -10,7 +10,8 @@
     "test:lightpanda-record": "node tests/lightpanda-record-live.mjs",
     "test:thread": "node tests/thread-live.mjs",
     "test:bench": "node tests/bench-burst.mjs",
-    "license:check": "node scripts/check-licenses.mjs"
+    "license:check": "node scripts/check-licenses.mjs",
+    "test:tool-boundary": "node tests/agent-tool-boundary.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "3.1.3"
