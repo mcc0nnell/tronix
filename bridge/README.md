@@ -80,7 +80,9 @@ not query Docker to prove that the image exists or can run; the earlier separate
 IHB container tests supply that narrower evidence. A successful result is
 only a consistency check on the current reviewed source files and local catalog.
 
-The next stage must be a separately admitted operator-owned *executor* for one
+The proposed external campaign executor is named **Rizzer**. See
+[RIZZER.md](RIZZER.md) for its boundaries and acceptance contract. The next
+stage requires a separately admitted operator-owned Rizzer service for one
 fixed synthetic profile, with complete process-tree cleanup and reconciliation.
 Until then, run campaigns using IHB's existing opt-in `isolated.py` **outside**
 Tronix, under direct operator control.

@@ -10,6 +10,8 @@ Do not interpret this preflight as a sandbox or an operational execution boundar
 
 - Tronix: admission, fair scheduling, bounded execution orchestration, lifecycle
   receipts and visibility into interrupted work.
+- **Rizzer**: proposed external, independently restricted executor for
+  pre-approved IHB campaigns. See [Rizzer contract](bridge/RIZZER.md).
 - IHB native fuzzer: mutations, corpus/coverage selection, instrumented target
   execution, sanitizer reports, replay and candidate finding artifacts.
 - WindAnvil: optional downstream provenance verification and independent
