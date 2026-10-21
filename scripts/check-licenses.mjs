@@ -4,7 +4,7 @@
 
 // Local, dependency-free licensing guard for first-party Tronix source.
 // Third-party checkouts and executables must retain their own licenses.
-import {readFileSync, readdirSync, statSync} from 'node:fs';
+import {readFileSync, readdirSync} from 'node:fs';
 import {join, extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -23,7 +23,8 @@ requireText('LICENSE', 'Apache License');
 requireText('LICENSE', 'END OF TERMS AND CONDITIONS');
 requireText('NOTICE', 'Copyright 2026 Robert McConnell');
 requireText('THIRD_PARTY_LICENSES.md', 'Lightpanda');
-requireText('CMakeLists.txt', 'SPDX-License-Identifier: Apache-2.0');
+const spdxMarker = 'SPDX-License-Identifier:' + ' Apache-2.0';
+requireText('CMakeLists.txt', spdxMarker);
 
 for (const path of ['package.json', 'package-lock.json']) {
   try {
@@ -47,9 +48,9 @@ function inspect(dir) {
       continue;
     }
     const content = read(rel);
-    const matches = content.match(/SPDX-License-Identifier: Apache-2\.0/g) || [];
-    if (matches.length !== 1 || !content.split('\n').slice(0, 12).some(line =>
-      /SPDX-License-Identifier: Apache-2\.0/.test(line))) {
+    const matches = content.split(spdxMarker).length - 1;
+    if (matches !== 1 || !content.split('\n').slice(0, 12).some(line =>
+      line.includes(spdxMarker))) {
       failures.push(`${rel}: exactly one Apache-2.0 SPDX header required near file start`);
     }
     checked++;
