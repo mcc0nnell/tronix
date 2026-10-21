@@ -1,0 +1,21 @@
+# Copyright 2026 Robert McConnell
+# SPDX-License-Identifier: Apache-2.0
+name: License verification
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify license metadata and SPDX headers
+        run: npm run license:check

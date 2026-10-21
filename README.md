@@ -327,3 +327,7 @@ Apache Celix, MessagePack, OpenThread, and Lightpanda. These projects remain
 under their own licenses; no rights in external source, binaries, or services
 are conveyed by the Tronix license. See
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for component details.
+
+Run `npm run license:check` to verify the first-party SPDX headers,
+root licensing notices, and npm package metadata. The lightweight
+GitHub Actions licensing check uses the same command when Actions is enabled.
