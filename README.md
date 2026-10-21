@@ -316,3 +316,18 @@ SHA-256 observation receipts. See [docs-lightpanda-workflows.md](docs-lightpanda
 for the architecture, precise reproduction steps, tested negative controls,
 and limitations. This does not enable arbitrary agent browsing or persistent
 browser credentials.
+
+## License and third-party dependencies
+
+Original Tronix source code and documentation are licensed under the
+[Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
+
+Tronix uses or interfaces with independently licensed software, including
+Apache Celix, MessagePack, OpenThread, and Lightpanda. These projects remain
+under their own licenses; no rights in external source, binaries, or services
+are conveyed by the Tronix license. See
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for component details.
+
+Run `npm run license:check` to verify the first-party SPDX headers,
+root licensing notices, and npm package metadata. The lightweight
+GitHub Actions licensing check uses the same command when Actions is enabled.

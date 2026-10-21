@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Live authorized browser fixture: private bridge -> existing gateway -> isolated Chrome target.
 // Does not launch or touch a signed-in browser profile.
 import assert from 'node:assert/strict';

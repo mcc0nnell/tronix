@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Explicit, fixed browser record/replay operations via the existing Lightpanda Agent Bridge.
 // MessagePack only between this bundle and a trusted, owned-target fixture bridge.
 #include "tronix_service.h"

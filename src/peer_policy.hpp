@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // TRONIX strict local peer policy. Linux AF_UNIX SO_PEERCRED authenticates UID.
 // This intentionally represents ONE Unix security principal, not agent identities
 // or process isolation. No untrusted client may choose its scheduling identity.

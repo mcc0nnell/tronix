@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // One-shot supervised worker execution (Linux/POSIX).
 // Never fork() a live Celix daemon: use posix_spawn() and a fresh process.
 #pragma once

@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // TRONIX v0.1 — experimental Celix services + bounded MessagePack IPC.
 #include "tronix_service.h"
 #include "events.hpp"

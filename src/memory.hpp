@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Native, opt-in per-agent key/value memory.
 // Scope is only the daemon's current Unix UID; agent strings are NOT identities.
 // This is a bounded append-only store, not an LLM or semantic memory index.

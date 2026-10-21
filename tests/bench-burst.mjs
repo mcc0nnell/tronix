@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Reproducible fixture-level scheduler benchmark; not a real-time certification.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';

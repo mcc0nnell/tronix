@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // End-to-end native Tronix scheduling -> pinned Lightpanda Agent Bridge
 // -> live CDP navigation/extraction -> sanitized record/replay receipts.
 import assert from 'node:assert/strict';

@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Local, deliberately narrow bridge between Tronix's Celix bundle and the
 // existing WindAnvil CDP gateway. Owns one disposable Chrome target.
 import net from 'node:net';

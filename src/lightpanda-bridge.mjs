@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Optional Lightpanda fork backend for Tronix's existing restricted CDP Celix bundle.
 // Only the administrator-configured loopback fixture is accessible through this bridge.
 // Never accept URLs, scripts, headers or binary paths from a Tronix agent request.

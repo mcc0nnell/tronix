@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Robert McConnell
+# SPDX-License-Identifier: Apache-2.0
 """One-shot, operator-pinned Lightpanda Agent Bridge record/replay driver.
 
 No agent-supplied URL, selector, script, executable, or receipt ID is accepted.

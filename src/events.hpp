@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // TRONIX experimental lifecycle ledger. No agent input or code execution here.
 // Native, bounded in-memory event fanout plus optional append-only durable record.
 // Journal records are length-prefixed MessagePack maps. A torn final write is

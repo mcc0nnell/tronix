@@ -9,9 +9,11 @@
     "test:lightpanda": "node tests/lightpanda-live.mjs",
     "test:lightpanda-record": "node tests/lightpanda-record-live.mjs",
     "test:thread": "node tests/thread-live.mjs",
-    "test:bench": "node tests/bench-burst.mjs"
+    "test:bench": "node tests/bench-burst.mjs",
+    "license:check": "node scripts/check-licenses.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "3.1.3"
-  }
+  },
+  "license": "Apache-2.0"
 }
