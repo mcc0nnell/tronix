@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Linux SO_PEERCRED authority integration. All calls use the same OS UID.
 // Verifies fail-closed policy mapping, not same-UID process isolation.
 import assert from 'node:assert/strict';

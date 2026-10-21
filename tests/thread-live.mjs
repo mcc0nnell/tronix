@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Opt-in end-to-end OpenThread simulation through native Tronix Celix.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';

@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 // Live integration of the owned Lightpanda fork with Tronix's native Celix/CDP adapter.
 // All browsing is confined to a throwaway HTTP fixture on 127.0.0.1.
 import assert from 'node:assert/strict';

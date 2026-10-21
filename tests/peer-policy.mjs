@@ -1,3 +1,5 @@
+// Copyright 2026 Robert McConnell
+// SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdtemp,rm,writeFile,chmod,symlink} from 'node:fs/promises';
