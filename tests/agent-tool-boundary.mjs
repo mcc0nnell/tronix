@@ -66,7 +66,7 @@ try {
     observed.ok === true && observed.state === 'completed' && observed.value === 42);
   const receipt = await new TronixClient(socket).receipt(observed.id);
   check('run receipt remains queryable after terminal acknowledgement',
-    receipt.ok === true && receipt.state === 'completed');
+    receipt.ok === true && receipt.receipt?.state === 'acked' && receipt.receipt?.value === 42);
   const nativeDenied = await new TronixClient(socket).submit(
     'negative-native', 'tool-bridge-fixture', 'Runtime.evaluate', 2000);
   check('underlying Celix adapter also refuses unrecognized operations',
