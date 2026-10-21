@@ -1,0 +1,11 @@
+{
+  "files": {
+    "engine.cc": "6bb86f244f854cd1b51ff37d0dfb644041c8c391fc306e386ad1e53366a21b7d",
+    "fixtures/buggy.c": "7784dbf847f512722641bdcf8a6a514966ecebf35c1fed9c06e5bcd0b41cb11a",
+    "fixtures/safe.c": "9bdaa42576c43a7933b4715ade081257f350453ef6a9edf70309af021d16ea63",
+    "isolated.py": "d75491809eeee7019d9ec62543f1f0c6a12d93badc5b51aaf5e791ca3842be01",
+    "run.py": "2b7e76422157ea8fa6c51709c88e35e4d6d120d44ad3b3b3037797df7c079f0f"
+  },
+  "image_id": "sha256:169b0a21069175140f9cd5d0d91c4d158b1cf5525ce1dcfd620b8daf336b0dac",
+  "schema": "tronix.ihb-preflight.v0"
+}

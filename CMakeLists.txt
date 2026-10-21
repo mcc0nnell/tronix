@@ -65,6 +65,27 @@ target_include_directories(tronix_thread PRIVATE include "${MSGPACK_SOURCE}/incl
 target_compile_definitions(tronix_thread PRIVATE MSGPACK_NO_BOOST=1)
 target_link_libraries(tronix_thread PRIVATE Celix::framework)
 
+# Synthetic IHB preflight only. No Docker/process execution rights in Celix.
+option(TRONIX_ENABLE_IHB_PREFLIGHT "Build read-only IHB synthetic profile preflight" OFF)
+set(TRONIX_IHB_PREFLIGHT_SOCKET "" CACHE STRING "Absolute private Unix socket path")
+set(TRONIX_IHB_PREFLIGHT_UID "" CACHE STRING "Expected Linux UID of broker")
+if(TRONIX_ENABLE_IHB_PREFLIGHT)
+  if(NOT TRONIX_IHB_PREFLIGHT_SOCKET MATCHES "^/[a-zA-Z0-9_./-]+$" OR
+     NOT TRONIX_IHB_PREFLIGHT_UID MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "Preflight requires a trusted absolute socket path and numeric broker UID")
+  endif()
+  add_celix_bundle(tronix_ihb_preflight
+    VERSION 0.1.0 SYMBOLIC_NAME org.tronix.adapter.ihb.preflight
+    NAME "Tronix read-only IHB synthetic profile preflight"
+    FILENAME tronix_ihb_preflight SOURCES src/ihb_preflight_adapter.c)
+  target_include_directories(tronix_ihb_preflight PRIVATE include)
+  target_compile_definitions(tronix_ihb_preflight PRIVATE
+    TRONIX_IHB_PREFLIGHT_SOCKET=\"${TRONIX_IHB_PREFLIGHT_SOCKET}\"
+    TRONIX_IHB_PREFLIGHT_UID=${TRONIX_IHB_PREFLIGHT_UID})
+  target_link_libraries(tronix_ihb_preflight PRIVATE Celix::framework)
+  file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tronix-ihb-preflight-socket.txt"
+    CONTENT "${TRONIX_IHB_PREFLIGHT_SOCKET}\n")
+endif()
 
 # Optional restricted Lightpanda Agent Bridge record/replay Celix bundle.
 # Use instead of tronix_cdp; the two adapters are mutually exclusive per runtime.

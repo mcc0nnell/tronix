@@ -15,3 +15,6 @@ tmp/
 
 # Owner-private socket and optional native receipt journal.
 private/
+
+# Local Python preflight compilation artifacts.
+__pycache__/

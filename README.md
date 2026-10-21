@@ -134,9 +134,10 @@ UID-bound admission policy and its remaining same-UID limitations.
 
 See [docs-ihb-fuzzing.md](docs-ihb-fuzzing.md) for the proposed campaign
 orchestration architecture, proposed static-profile/manifest contract, evidence
-boundary, sandbox requirements, and acceptance plan. **This is documentation
-only**: there is no `fuzz.*` Celix adapter, campaign submission API or
-IHB integration in the running Tronix service.
+boundary, sandbox requirements, and acceptance plan. The read-only
+`fuzz.preflight.*` Celix adapter described below now exists, but the
+campaign-submission/execution API remains a proposal. No IHB fuzz campaign
+runs inside Tronix or receives automatic Blade admission.
 
 The design keeps mutation, coverage feedback, replay and crash evidence within
 IHB. Tronix would schedule bounded *campaigns* and record execution receipts;
@@ -144,6 +145,17 @@ Blade would make independent admission decisions and WindAnvil could verify
 provenance. The existing supervised worker's 1 GiB `RLIMIT_AS` is unsuitable
 for assuming ASan compatibility, and its same-UID execution is not a sandbox.
 Do not mount a Docker socket into `tronixd` as a workaround.
+
+## Read-only IHB synthetic preflight (opt-in)
+
+The optional `tronix_ihb_preflight` Celix bundle verifies two approved IHB
+synthetic profiles through a private local Unix socket. It preserves Tronix's
+existing static operation admission and native receipt behavior without adding
+arbitrary command execution or granting Docker access to the adapter.
+**This is a source-identity preflight, not a fuzz campaign execution.**
+See [bridge/README.md](bridge/README.md) for the pinned catalog, build steps,
+22 focused verification checks, same-UID security limitation and remaining
+executor admission requirements. The default build leaves it disabled.
 
 ## Native lifecycle and receipts (first agent-kernel slice)
 
