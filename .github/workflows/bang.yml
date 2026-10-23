@@ -30,5 +30,13 @@ jobs:
             sixs/native/bang/src/lowbang.c -lcrypto \
             -o /tmp/tronix-bang-fixture
           /tmp/tronix-bang-fixture
+      - name: Native signed caption stream, subscribers and backpressure
+        run: |
+          cc -std=c11 -O1 -Wall -Wextra -Wpedantic -Werror \
+            -Iinclude -Isixs/native/bang/include \
+            src/bang_stream.c tests/bang-stream.c \
+            sixs/native/bang/src/lowbang.c -pthread -lcrypto \
+            -o /tmp/tronix-bang-stream
+          /tmp/tronix-bang-stream
       - name: Verify project licensing
         run: npm run license:check
