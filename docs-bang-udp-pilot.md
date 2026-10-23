@@ -7,7 +7,7 @@ This milestone removes the OpenThread CLI's ASCII-hex path from **the C/Celix in
 ## Code and service boundaries
 
 - `include/tronix_bang_udp.h`: separately versioned `org.tronix.bang.udp` Celix service interface with explicit `local_port`, `send_event` and bounded `receive_to_stream` callbacks. It never invokes the old integer-returning Tronix job API.
-- `src/bang_udp_adapter.c`: registers an opt-in IPv6 datagram socket bound to **`::1` only** (v6-only), rejects untrusted sources outside loopback, exact-decodes bounded binary events via the earlier `tronix_bang_wire` codec and invokes `org.tronix.bang.stream` using a scoped Celix service callback. The stream service performs pinned Ed25519 publisher-key verification and fans out only authenticated events.
+- `src/bang_udp_adapter.c`: registers an opt-in IPv6 datagram socket bound to **`::1` only** (v6-only), rejects untrusted sources outside loopback, delegates bounded binary frame decoding to the pinned 6s-owned lowbang_udp and lowbang_wire libraries and invokes `org.tronix.bang.stream` using a scoped Celix service callback. The stream service performs pinned Ed25519 publisher-key verification and fans out only authenticated events.
 - `tests/bang-udp-celix-node.c`: intentionally trusted test harness that loads **both** Celix bundles in each of two processes; a fixed synthetic Ed25519 fixture publisher sends two valid events out of sequence, a replay and a tampered frame. The sender additionally injects an oversized UDP datagram and an invalid header through a test-only raw socket; those paths are not exposed by the signed-event send service. The receiving process pins the corresponding public key, subscribes two local consumers, admits packets and checks ordering, duplicate rejection and signature failure.
 - `tests/bang-udp-celix-live.mjs`: creates disposable private Celix caches, tests that activation fails without `TRONIX_BANG_UDP_ENABLE_FIXTURE=1`, spawns the two independent C/Celix processes, and verifies receipts before cleaning up.
 - `CMakeLists.txt` and `package.json`: optional native bundle/executable build targets and `npm run test:bang:udp` workflow. The native GitHub Actions test now compiles this optional path using the same pinned 6lowStick C library.
@@ -18,7 +18,7 @@ Messages may be unauthenticated until presented to the stream service. Merely re
 
 ## Build and test
 
-Pin 6lowStick at `28a664c907d25934b92f3f91055ed8ba7f5b9d6a`, supply the reviewed Celix/msgpack-c sources, configure `-DTRONIX_BANG_SOURCE=/absolute/path/6lowstick/native/bang`, and run:
+Pin 6lowStick at `800ec1c84cf045362cfe528c2c79008021e2c898`, supply the reviewed Celix/msgpack-c sources, configure `-DTRONIX_BANG_SOURCE=/absolute/path/6lowstick/native/bang`, and run:
 
 ```sh
 cmake --build build --target tronix_bang_stream_bundle tronix_bang_udp_bundle bang-udp-celix-node -j 2
@@ -35,3 +35,13 @@ On Butcher, all three consecutive independent-process Celix binary UDP runs pass
 ## Next gate
 
 Replace the lab's Linux `::1` socket with a bounded OpenThread POSIX adapter using actual OpenThread UDP APIs. Exercise the same signed binary C event path between simulated nodes and across simulated fragmentation and partitions; measure loss, repeats, out-of-order behavior and process-side latency. Production radio framing must account for 802.15.4 MTU and security overhead. Never declare real RF reception without independent physical hardware results.
+
+
+## Source ownership clarification
+
+The binary event codec, socket lifecycle, bound UDP receive and send functions
+now belong to 6lowStick/native/bang. Tronix src/bang_udp_adapter.c only wraps
+those functions in a trusted opt-in Celix service and forwards untrusted frame
+candidates into the registered pinned-key stream verifier. See 6s
+docs/6lowbang-transport.md. The 6s source pin is
+800ec1c84cf045362cfe528c2c79008021e2c898.

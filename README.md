@@ -344,21 +344,16 @@ npm run test:bang:udp. See
 [the native binary UDP pilot](docs-bang-udp-pilot.md) and
 [the evidence record](evidence/bang-udp-celix-20261023.json).
 
-## OpenThread × 6lowBang signed caption laboratory
+## 6lowBang transport is maintained in 6lowStick
 
-A new native C11 signed-event wire codec and two-node OpenThread POSIX UDP
-simulation have passed three consecutive fresh-flash local trials. Events
-traversed a simulated Thread network in deliberately reversed sequence and
-were validated, ordered and delivered to two subscribers by the C stream hub.
-This was **not an on-air test or a live caption service**. The CLI lab sends
-inefficient ASCII hex, and fresh isolated OpenThread flash is essential to
-the recorded repeat trials.
+The C11 signed binary codec, bounded POSIX UDP backend and two-node
+OpenThread POSIX simulator exercise are now **owned by mcc0nnell/6lowstick**
+(PR #32, signed commit 800ec1c). Tronix compiles the pinned 6s libraries
+and only supplies optional Celix services, lifecycle, and subscriber fanout.
+The duplicate Tronix codec and CLI radio harness have been deleted.
 
-Build the optional bang-thread-codec target and run the native selftest with
-npm run test:bang:codec. The separate two-node lab uses npm run test:bang:thread
-with a reviewed OT_CLI_PATH and BANG_THREAD_CODEC. See
-[the signed OpenThread pilot](docs-bang-thread-pilot.md) and
-[recorded evidence](evidence/bang-thread-20261023.json).
+The older [OpenThread research note](docs-bang-thread-pilot.md) remains as
+historical simulation evidence, not a physical RF claim.
 
 ## Lightpanda fork backend (opt-in, local fixture)
 

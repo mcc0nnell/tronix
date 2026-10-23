@@ -127,24 +127,14 @@ if(TRONIX_BANG_SOURCE)
     COMMAND $<TARGET_FILE:tronix_bang_stream_test>
     DEPENDS tronix_bang_stream_test
     COMMENT "Test signed C stream subscription and explicit backpressure")
-  # Signed-event lab codec; simulates a two-node OpenThread UDP hop through
-  # the external OT CLI rather than routing text through Tronix job values.
-  add_executable(bang-thread-codec src/bang_wire.c src/bang_thread_codec.c)
-  target_include_directories(bang-thread-codec PRIVATE include)
-  target_compile_definitions(bang-thread-codec PRIVATE _POSIX_C_SOURCE=200809L)
-  target_link_libraries(bang-thread-codec PRIVATE tronix_bang_stream_core)
-  add_custom_target(bang_thread_codec_test
-    COMMAND $<TARGET_FILE:bang-thread-codec> selftest
-    DEPENDS bang-thread-codec
-    COMMENT "Check canonical wire boundaries before Thread simulator tests")
   # Native C/Celix UDP transport, restricted to IPv6 loopback.
   # Decode and pass the signed event to the typed stream service for validation.
   add_celix_bundle(tronix_bang_udp
     VERSION 0.1.0 SYMBOLIC_NAME org.tronix.bang.udp
     NAME "Tronix experimental loopback C signed caption transport"
-    FILENAME tronix_bang_udp SOURCES src/bang_udp_adapter.c src/bang_wire.c)
+    FILENAME tronix_bang_udp SOURCES src/bang_udp_adapter.c)
   target_include_directories(tronix_bang_udp PRIVATE include)
-  target_link_libraries(tronix_bang_udp PRIVATE Celix::framework lowbang)
+  target_link_libraries(tronix_bang_udp PRIVATE Celix::framework lowbang_udp)
   add_executable(bang-udp-celix-node tests/bang-udp-celix-node.c)
   target_include_directories(bang-udp-celix-node PRIVATE include)
   target_link_libraries(bang-udp-celix-node PRIVATE Celix::framework lowbang)

@@ -10,7 +10,7 @@ Source files: `src/bang_fixture.c` is independent of Celix and calls the C11 lib
 
 ## Build with reviewed dependencies
 
-The integration was written for public 6lowStick PR #32 at full commit `28a664c907d25934b92f3f91055ed8ba7f5b9d6a`. **Pin this exact commit**, not the moving branch. Obtain its `native/bang` source directory and existing pinned Tronix Celix/msgpack-c dependencies. This project does not silently fetch or vendor external source.
+The integration was written for public 6lowStick PR #32 at full commit `800ec1c84cf045362cfe528c2c79008021e2c898`. **Pin this exact commit**, not the moving branch. Obtain its `native/bang` source directory and existing pinned Tronix Celix/msgpack-c dependencies. This project does not silently fetch or vendor external source.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \

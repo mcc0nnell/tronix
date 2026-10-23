@@ -4,7 +4,7 @@
 // over IPv6 loopback UDP. Never production keys or an actual Thread/RF claim.
 #define _GNU_SOURCE
 #include "tronix_bang_udp.h"
-#include "tronix_bang_wire.h"
+#include "lowbang_wire.h"
 #include <celix_framework_factory.h>
 #include <celix_framework.h>
 #include <celix_bundle_context.h>
@@ -118,7 +118,7 @@ static int receive_events(celix_bundle_context_t* ctx,call_state* st) {
     if(run(ctx,true,st)!=BANG_OK)return 1;
     printf("READY %u\n",(unsigned)st->port);
     fflush(stdout);
-    const bang_status expected[]={BANG_OK,BANG_OK,BANG_REPLAY,BANG_UNAUTHORIZED,BANG_UNAUTHORIZED,BANG_INVALID};
+    const bang_status expected[]={BANG_OK,BANG_OK,BANG_REPLAY,BANG_UNAUTHORIZED,BANG_INVALID,BANG_INVALID};
     for(int i=0;i<6;i++) {
         bang_status got=BANG_NOT_READY;
         for(int attempt=0;attempt<12 && got==BANG_NOT_READY;attempt++) {
@@ -173,8 +173,8 @@ static int publish_events(celix_bundle_context_t* ctx,uint16_t target,call_state
             struct sockaddr_in6 dst={0};
             dst.sin6_family=AF_INET6;dst.sin6_addr=in6addr_loopback;
             dst.sin6_port=htons(target);
-            uint8_t oversized[TRONIX_BANG_WIRE_MAX+1]={0};
-            uint8_t invalid_magic[TRONIX_BANG_WIRE_HEADER]={0};
+            uint8_t oversized[BANG_WIRE_MAX+1]={0};
+            uint8_t invalid_magic[BANG_WIRE_HEADER]={0};
             good=sendto(fd,oversized,sizeof oversized,0,
                    (const struct sockaddr*)&dst,sizeof dst)==(ssize_t)sizeof oversized;
             usleep(25000);
