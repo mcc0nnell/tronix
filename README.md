@@ -166,6 +166,23 @@ See [docs-capability-grants.md](docs-capability-grants.md) for the exact
 file contracts, local fixture, verifier command, tests and limitations.
 Run `npm run test:grants` to exercise the real native Celix integration.
 
+## Independently retained receipt checkpoints (optional)
+
+An operator can now verify an existing HMAC receipt chain and create a
+**separately signed, create-only evidence checkpoint** with a distinct
+operator-held key. The verifier can check one or many stored checkpoints,
+including the exact historical HMAC at each anchored sequence. This detects
+rollback below a retained checkpoint and a different internally valid chain
+signed with the daemon receipt key.
+
+**No remote store or automatic publication is built in.** A checkpoint
+becomes an independent anti-rollback anchor only when an operator stores
+it and its separate signing key beyond the daemon's write access.
+Operations appended after the newest retained checkpoint are not protected
+against complete-prefix rollback. See
+[docs-evidence-checkpoints.md](docs-evidence-checkpoints.md) for operator
+commands, trust model, limitations and tests.
+
 ## Native agent-kernel slices
 
 See [docs-agent-runtime.md](docs-agent-runtime.md) for the supervised process

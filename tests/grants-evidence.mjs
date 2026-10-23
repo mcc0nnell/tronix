@@ -1,7 +1,7 @@
 // Copyright 2026 Robert McConnell
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import {createHash,randomBytes} from 'node:crypto';
+import {createHash,createHmac,randomBytes} from 'node:crypto';
 import {spawn,spawnSync} from 'node:child_process';
 import {mkdtemp,readFile,rm,writeFile,chmod,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -17,6 +17,8 @@ const worker=join(root,'build/tronix_worker');
 const scheduler=join(root,'build/tronix_scheduler.zip');
 const keyPath=join(dir,'hmac.key');
 await writeFile(keyPath,randomBytes(32),{mode:0o600});
+const checkpointKey=join(dir,'operator-only-checkpoint.key');
+await writeFile(checkpointKey,randomBytes(32),{mode:0o600});
 let index=0,live=null;
 const checks=[];
 const check=(name,ok)=>{assert.ok(ok,name);checks.push(name);};
@@ -64,9 +66,10 @@ async function terminal(client,id){
   }
   throw Error('no terminal status for '+id);
 }
-function verify(evidence,grant){
+function verify(evidence,grant,extra=[]){
   return spawnSync('python3',['scripts/verify_grant_evidence.py','--key',keyPath,
-     '--grants',grant,'--adapter',adapter,'--evidence',evidence],{cwd:root,encoding:'utf8'});
+     '--grants',grant,'--adapter',adapter,'--evidence',evidence,...extra],
+    {cwd:root,encoding:'utf8'});
 }
 try{
   await rejects('mismatched approved artifact fails startup',
@@ -113,8 +116,93 @@ try{
   const v2=verify(live.evidence,join(dir,'grant-'+index+'.conf'));
   check('independent verifier checks both chained receipts',
     v2.status===0&&JSON.parse(v2.stdout).verified===2);
-  const tampered=join(dir,'tampered.txt');
+  // An operator-owned second key signs a create-only checkpoint after full
+  // verification. The test directory models retention; deployment must export
+  // this anchor to an independent trust domain.
+  const grantPath=join(dir,'grant-'+index+'.conf');
+  const checkpointPath=join(dir,'operator-checkpoint-2.json');
+  const createAnchor=verify(live.evidence,grantPath,
+    ['--write-checkpoint',checkpointPath,'--checkpoint-key',checkpointKey]);
+  check('operator creates separate signed checkpoint after verifying native receipts',
+    createAnchor.status===0&&JSON.parse(createAnchor.stdout).checkpointMode==='created');
+  const anchor=JSON.parse(await readFile(checkpointPath,'utf8'));
+  check('signed checkpoint captures exact record count and chain head',
+    anchor.sequence===2 && anchor.chainHead===JSON.parse(v2.stdout).chainHead);
+  const checked=verify(live.evidence,grantPath,
+    ['--checkpoint',checkpointPath,'--checkpoint-key',checkpointKey]);
+  check('external checkpoint verifies frozen prefix',
+    checked.status===0&&JSON.parse(checked.stdout).anchoredPrefix===2);
   const original=await readFile(live.evidence,'utf8');
+  const shorter=join(dir,'complete-but-rolled-back.txt');
+  await writeFile(shorter,original.split('\n')[0]+'\n');
+  check('previously valid single-record prefix verifies without checkpoint',
+    verify(shorter,grantPath).status===0);
+  check('independently retained checkpoint detects valid suffix rollback',
+    verify(shorter,grantPath,
+      ['--checkpoint',checkpointPath,'--checkpoint-key',checkpointKey]).status!==0);
+  // A hostile daemon knows its *receipt* key. Even if it can produce a
+  // different internally valid chain, the operator-only anchor must reject it.
+  const alteredRecords=original.trimEnd().split('\n');
+  const changed=alteredRecords[1].split(' ');
+  changed[5]='failed';
+  changed[7]='-';
+  changed[11]=createHmac('sha256',await readFile(keyPath))
+    .update(changed.slice(0,11).join(' ')).digest('hex');
+  const rewrittenChain=join(dir,'internally-valid-rewritten-chain.txt');
+  await writeFile(rewrittenChain,[alteredRecords[0],changed.join(' ')].join('\n')+'\n');
+  check('forged chain with known daemon HMAC key passes legacy verification',
+    verify(rewrittenChain,grantPath).status===0);
+  check('operator checkpoint rejects alternative valid daemon-signed chain',
+    verify(rewrittenChain,grantPath,
+      ['--checkpoint',checkpointPath,'--checkpoint-key',checkpointKey]).status!==0);
+  const beforeOverwrite=await readFile(checkpointPath,'utf8');
+  check('create-only checkpoint refuses overwrite',
+    verify(live.evidence,grantPath,
+      ['--write-checkpoint',checkpointPath,'--checkpoint-key',checkpointKey]).status!==0);
+  check('rejected overwrite preserves original external anchor',
+    (await readFile(checkpointPath,'utf8'))===beforeOverwrite);
+  const wrongOperatorKey=join(dir,'wrong-operator-key');
+  await writeFile(wrongOperatorKey,randomBytes(32),{mode:0o600});
+  check('incorrect operator-only checkpoint key is rejected',
+    verify(live.evidence,grantPath,
+      ['--checkpoint',checkpointPath,'--checkpoint-key',wrongOperatorKey]).status!==0);
+  check('using daemon receipt key as operator key is forbidden',
+    verify(live.evidence,grantPath,
+      ['--checkpoint',checkpointPath,'--checkpoint-key',keyPath]).status!==0);
+  const mutatedAnchor=join(dir,'corrupted-anchor.json');
+  await writeFile(mutatedAnchor,beforeOverwrite.replace('"sequence":2','"sequence":1'));
+  check('tampered checkpoint signature is rejected',
+    verify(live.evidence,grantPath,
+      ['--checkpoint',mutatedAnchor,'--checkpoint-key',checkpointKey]).status!==0);
+
+  check('later valid job is admitted after anchoring',
+    (await client.submit('allowed3','fixture','demo.constant',2000)).ok);
+  check('later valid job completes after anchoring',
+    (await terminal(client,'allowed3')).state==='completed');
+  const extended=verify(live.evidence,grantPath,
+    ['--checkpoint',checkpointPath,'--checkpoint-key',checkpointKey]);
+  check('chain extension preserves checkpointed prefix',
+    extended.status===0&&JSON.parse(extended.stdout).verified===3);
+  const checkpoint3=join(dir,'operator-checkpoint-3.json');
+  const snapshot3=verify(live.evidence,grantPath,
+    ['--write-checkpoint',checkpoint3,'--checkpoint-key',checkpointKey]);
+  check('second monotonic operator checkpoint created',
+    snapshot3.status===0&&JSON.parse(snapshot3.stdout).verified===3);
+  const checkBoth=verify(live.evidence,grantPath,
+    ['--checkpoint',checkpointPath,'--checkpoint',checkpoint3,
+     '--checkpoint-key',checkpointKey]);
+  check('multiple independently signed checkpoints verify',
+    checkBoth.status===0&&JSON.parse(checkBoth.stdout).checkpointCount===2);
+  const twoRecords=join(dir,'two-anchored-only.txt');
+  await writeFile(twoRecords,(await readFile(live.evidence,'utf8')).split('\n')
+    .slice(0,2).join('\n')+'\n');
+  check('checkpoint cannot detect rollback entirely after its last anchor',
+    verify(twoRecords,grantPath,
+      ['--checkpoint',checkpointPath,'--checkpoint-key',checkpointKey]).status===0);
+  check('later checkpoint detects rollback that earlier anchor allows',
+    verify(twoRecords,grantPath,
+      ['--checkpoint',checkpoint3,'--checkpoint-key',checkpointKey]).status!==0);
+  const tampered=join(dir,'tampered.txt');
   await writeFile(tampered,original.replace('completed','overrun'));
   check('mutated receipt rejected',verify(tampered,join(dir,'grant-'+index+'.conf')).status!==0);
   const truncated=join(dir,'truncated.txt');
