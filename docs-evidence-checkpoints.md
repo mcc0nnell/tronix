@@ -93,6 +93,14 @@ Exit code 0 means the presented receipt chain is valid and consistent with
 all supplied checkpoints. Exit code 1 means failure. The JSON output
 includes `checkpointMode`, `anchoredPrefix` and `checkpointCount`.
 
+## Optional Cloudflare publication integration
+
+[Cloudflare Worker + D1 publication](docs-cloudflare-checkpoints.md) can
+store signed checkpoints off-host with monotonic insertion and exact
+read-back checks, once an independent operator provisions it. **No Worker
+or D1 deployment is claimed**, and a Cloudflare administrator can still
+rewrite or delete data. This is not immutable external custody.
+
 ## Limitations and release gates
 
 - **Rollback after the newest checkpoint is not detected.** For example,

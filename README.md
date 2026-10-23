@@ -183,6 +183,22 @@ against complete-prefix rollback. See
 [docs-evidence-checkpoints.md](docs-evidence-checkpoints.md) for operator
 commands, trust model, limitations and tests.
 
+## Cloudflare checkpoint publication (optional; not deployed)
+
+A small Cloudflare Worker + D1 integration accepts **operator-signed**
+checkpoints and retains an application-level monotonic history keyed by
+adapter and grant SHA-256. It independently verifies the checkpoint HMAC,
+uses separate read and publish access tokens, and provides exact historical
+read-back. The standalone operator-side Python publisher verifies the
+checkpoint before publishing and checks byte-for-byte remote retrieval.
+
+The account, D1 migration, Worker secrets and deployment must be separately
+provisioned by an authorized operator. No production deployment or immutable
+custody is claimed: Cloudflare administrators can alter D1 and Worker state.
+See [docs-cloudflare-checkpoints.md](docs-cloudflare-checkpoints.md) for the
+configuration and security limitations. Test with
+`npm run test:checkpoint-cloudflare`.
+
 ## Native agent-kernel slices
 
 See [docs-agent-runtime.md](docs-agent-runtime.md) for the supervised process
