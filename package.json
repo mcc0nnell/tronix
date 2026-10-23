@@ -4,9 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "node tests/smoke.mjs && node tests/hardening.mjs && node tests/agent-ledger.mjs && node tests/isolation.mjs && node tests/memory.mjs && node tests/authority.mjs && node tests/peer-policy.mjs && node tests/archive-identity.mjs && node tests/grants-evidence.mjs",
+    "test": "node tests/smoke.mjs && node tests/hardening.mjs && node tests/agent-ledger.mjs && node tests/isolation.mjs && node tests/memory.mjs && node tests/authority.mjs && node tests/peer-policy.mjs && node tests/archive-identity.mjs && node tests/grants-evidence.mjs && npm run test:checkpoint-cloudflare",
     "test:identity": "node tests/archive-identity.mjs",
     "test:grants": "node tests/grants-evidence.mjs",
+    "test:checkpoint-cloudflare": "node tests/cloudflare-anchor.mjs && python3 scripts/check_cloudflare_d1_sql.py",
     "test:cdp": "node tests/cdp-live.mjs",
     "test:lightpanda": "node tests/lightpanda-live.mjs",
     "test:lightpanda-record": "node tests/lightpanda-record-live.mjs",

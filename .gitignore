@@ -15,3 +15,8 @@ tmp/
 
 # Owner-private socket and optional native receipt journal.
 private/
+
+# Cloudflare local deployment config and private bindings
+cloudflare/wrangler.jsonc
+cloudflare/.dev.vars
+cloudflare/.wrangler/

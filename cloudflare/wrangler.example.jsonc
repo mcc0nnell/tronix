@@ -1,0 +1,16 @@
+{
+  // Copy to cloudflare/wrangler.jsonc and set YOUR OWN D1 database UUID.
+  // Do not commit tokens or the operator HMAC signing key.
+  "name": "tronix-checkpoint-anchor",
+  "main": "checkpoint-worker.mjs",
+  "compatibility_date": "2026-10-23",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tronix-checkpoints",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
