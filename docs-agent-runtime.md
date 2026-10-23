@@ -47,12 +47,35 @@ supervision is enabled; however **same-UID worker code is not security
 isolated**. No seccomp, namespace, cgroup, separate UID, or filesystem/network
 confinement is implemented. Local code and metadata on disk can change between
 inspection and execution; the child compares names, lanes and budgets, but
-there is no signed artifact identity or containment for same-UID processes.
+an optional operator SHA-256 pin controls exact adapter ZIP bytes, but there is no signed artifact identity or containment for same-UID processes.
 Child operations can have external side effects before being killed; timeouts
 do not roll them back. The daemon still processes one active operation at a time.
 
 The default behavior without `--worker` remains the in-process execution
 path, for backward compatibility. Do not expose a daemon or socket publicly.
+
+## Optional byte-pinned adapter activation
+
+For a reviewed adapter bundle, pass `--adapter-sha256` with exactly 64
+lowercase hexadecimal characters. This explicit operator pin controls the
+**complete adapter ZIP bytes**, not the ephemeral Celix bundle/service ID or
+a bundle-advertised service ranking. Both the main daemon and each worker
+refuse mismatches before activating the adapter. Each reads the source
+without following symlinks, checks that it is a regular file no larger than
+32 MiB, and copies the verified bytes into its own private Celix cache with
+read-only file permissions. In supervised mode the parent first freezes a
+verified private archive, and the child verifies a new copy of that archive
+before policy inspection or execution. Replacing the original source file
+after daemon startup cannot silently change the bytes used by existing
+supervised jobs.
+
+No pin means legacy behavior; operators should opt in for trusted deployments.
+This does not authenticate who supplied the pin, prove bundle/configuration
+signatures, or isolate same-UID processes with host filesystem permissions.
+It also does not add independent evidence verification. The existing finite
+operation/lane/budget checks still apply. The targeted native test covers
+startup mismatch, symlink denial, in-process and supervised execution,
+and original-source mutation after startup.
 
 ## Optional UID-bound admission
 

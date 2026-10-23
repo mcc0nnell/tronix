@@ -46,7 +46,7 @@ code, TRON branding rights, or hard-real-time guarantees. It currently consists 
 ## Reproduce the build
 
 Prerequisites: Linux, CMake >=3.20, Ninja, C/C++ compilers, the required Celix
-build dependencies (Jansson, libzip, etc.), Node 22, npm. The tested Celix and
+build dependencies (Jansson, libzip, OpenSSL libcrypto development headers, etc.), Node 22, npm. The tested Celix and
 MessagePack source revisions were:
 
 - Apache Celix `270c784d20dabd0b1f6418c7ee2195822ec9ef90`
@@ -121,6 +121,32 @@ nanoseconds. Celix service ABI **2.0.0** intentionally rejects old adapter bundl
 
 The optional JavaScript `TronixClient` is in `src/client.mjs`. It is an
 IPC client, **not** the execution or scheduling runtime.
+
+## Operator-pinned Celix adapter identity (optional)
+
+Supply `--adapter-sha256` with the **lowercase SHA-256 of the exact adapter
+ZIP**. When enabled, the daemon copies the archive through an `O_NOFOLLOW`
+regular-file descriptor into its private Celix cache, validates the copied
+bytes and activates only that snapshot. In supervised mode the startup policy
+inspection and **every** one-shot worker additionally verify private snapshots
+against the same pin *before adapter activation*. A changed or mismatched
+archive refuses startup or worker execution.
+
+```sh
+ADAPTER="$(pwd)/build/tronix_demo.zip"
+PIN="$(sha256sum "$ADAPTER" | cut -d' ' -f1)"
+./build/tronixd --socket "$(pwd)/private/tronix.sock" \
+  --scheduler "$(pwd)/build/tronix_scheduler.zip" \
+  --adapter "$ADAPTER" \
+  --worker "$(pwd)/build/tronix_worker" \
+  --adapter-sha256 "$PIN"
+```
+
+This is an **opt-in operator-administered byte identity**, not signatures,
+configuration identity, service ranking authorization, or protection from
+malicious same-UID processes. The original unpinned mode remains supported.
+The protocol v1 and operation ABI are unchanged. Test with
+`npm run test:identity`; see [docs-agent-runtime.md](docs-agent-runtime.md).
 
 ## Native agent-kernel slices
 

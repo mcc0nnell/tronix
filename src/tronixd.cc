@@ -7,6 +7,7 @@
 #include "memory.hpp"
 #include "authority.hpp"
 #include "peer_policy.hpp"
+#include "archive_identity.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
 #include <celix_framework.h>
@@ -61,6 +62,7 @@ struct Runtime {
     const tronix::PeerPolicy* policy;
     std::string worker_binary;
     std::string adapter_path;
+    std::string adapter_sha256;
     std::vector<tronix::OperationPolicy> policies;
     std::atomic<bool> running{true};
     std::atomic<uint64_t> admissions{0};
@@ -85,7 +87,7 @@ void worker(Runtime* r){
                 // new process, never on the daemon's worker thread.
                 const auto outcome=tronix::supervise(r->worker_binary,r->adapter_path,
                                                        j.operation,j.budget_ms,r->running,
-                                                       false,j.lane);
+                                                       false,j.lane,r->adapter_sha256);
                 ok=outcome.ok;value=outcome.value;
             }else{
                 with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
@@ -484,12 +486,12 @@ void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
 }
 }
 int main(int argc,char** argv){
-    if((argc!=7&&argc!=9&&argc!=11&&argc!=13&&argc!=15)||std::strcmp(argv[1],"--socket")!=0||
+    if(argc<7 || argc>17 || argc%2==0 || std::strcmp(argv[1],"--socket")!=0||
        std::strcmp(argv[3],"--scheduler")!=0||std::strcmp(argv[5],"--adapter")!=0){
-        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy] [--policy PRIVATE.policy]\n");
+        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy] [--policy PRIVATE.policy] [--adapter-sha256 LOWERCASE_SHA256]\n");
         return 2;
     }
-    std::string journal_path,worker_binary,memory_path,authority_path,policy_path;
+    std::string journal_path,worker_binary,memory_path,authority_path,policy_path,adapter_sha256;
     for(int i=7;i<argc;i+=2){
         const std::string option=argv[i],value=argv[i+1];
         if(option=="--journal" && journal_path.empty())journal_path=value;
@@ -497,6 +499,8 @@ int main(int argc,char** argv){
         else if(option=="--memory" && memory_path.empty())memory_path=value;
         else if(option=="--authority" && authority_path.empty())authority_path=value;
         else if(option=="--policy" && policy_path.empty())policy_path=value;
+        else if(option=="--adapter-sha256" && adapter_sha256.empty() &&
+                tronix::valid_sha256(value))adapter_sha256=value;
         else return 2;
     }
     if(!authority_path.empty() && !policy_path.empty())return 2;
@@ -546,10 +550,18 @@ int main(int argc,char** argv){
     auto* framework=celix_frameworkFactory_createFramework(cfg);
     if(!framework){std::fprintf(stderr,"Celix initialization failed\n");std::filesystem::remove_all(cache);return 3;}
     auto* ctx=celix_framework_getFrameworkContext(framework);
+    std::string verified_adapter;
+    try { verified_adapter=tronix::snapshot_adapter(argv[6],cache,adapter_sha256); }
+    catch(const std::exception& e){
+        std::fprintf(stderr,"adapter identity verification failed: %s\n",e.what());
+        celix_frameworkFactory_destroyFramework(framework);
+        std::filesystem::remove_all(cache);
+        return 3;
+    }
     std::vector<tronix::OperationPolicy> policies;
     if(!worker_binary.empty()){
         const std::atomic<bool> alive{true};
-        auto description=tronix::inspect_policy(worker_binary,argv[6],alive);
+        auto description=tronix::inspect_policy(worker_binary,verified_adapter,alive,adapter_sha256);
         if(!description.ok||description.policies.empty()){
             std::fprintf(stderr,"worker policy inspection failed; refusing startup\n");
             celix_frameworkFactory_destroyFramework(framework);
@@ -559,7 +571,7 @@ int main(int argc,char** argv){
         policies=std::move(description.policies);
     }
     if(celix_bundleContext_installBundle(ctx,argv[4],true)<0 ||
-       (worker_binary.empty() && celix_bundleContext_installBundle(ctx,argv[6],true)<0)){
+       (worker_binary.empty() && celix_bundleContext_installBundle(ctx,verified_adapter.c_str(),true)<0)){
         std::fprintf(stderr,"bundle installation failed\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;
     }
@@ -569,7 +581,7 @@ int main(int argc,char** argv){
         ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
-    Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),policy.get(),worker_binary,argv[6],policies};
+    Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),policy.get(),worker_binary,verified_adapter,adapter_sha256,policies};
     std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;
