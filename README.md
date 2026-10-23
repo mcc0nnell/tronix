@@ -148,6 +148,24 @@ malicious same-UID processes. The original unpinned mode remains supported.
 The protocol v1 and operation ABI are unchanged. Test with
 `npm run test:identity`; see [docs-agent-runtime.md](docs-agent-runtime.md).
 
+## Operator grants and verifiable terminal receipts (optional)
+
+An additional **supervised-only** mode accepts a private `--grants` file
+that binds explicitly allowed Celix operations to the exact SHA-256-pinned
+bundle's real manifest name and version. The intersection of the worker's
+frozen operation policy, operator grants, and any peer policy determines
+admission. The exact grants-file digest is recorded as operator-policy
+configuration identity.
+
+A new private HMAC-SHA256 terminal evidence sidecar is checked by an
+independent Python verifier. This is **tamper-evident for presented records**,
+not rollback/completeness protection without external checkpoints; it does
+not provide same-UID isolation, sign artifacts, or prove application delivery.
+
+See [docs-capability-grants.md](docs-capability-grants.md) for the exact
+file contracts, local fixture, verifier command, tests and limitations.
+Run `npm run test:grants` to exercise the real native Celix integration.
+
 ## Native agent-kernel slices
 
 See [docs-agent-runtime.md](docs-agent-runtime.md) for the supervised process
