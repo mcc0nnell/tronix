@@ -1,0 +1,78 @@
+{
+  "schema": "tronix.bang.celix-udp.evidence.v1",
+  "date": "2026-10-23",
+  "host": "butcher, isolated disposable native build",
+  "source": "mcc0nnell/tronix feat/6lowbang-celix-fixture",
+  "library_pin": "mcc0nnell/6lowstick 28a664c907d25934b92f3f91055ed8ba7f5b9d6a",
+  "native_dependencies": "existing locally provisioned Celix 270c784d and msgpack-c; not an independently hermetic compilation",
+  "transport": "IPv6 loopback ::1, raw binary signed events (no OpenThread, no 802.15.4 RF)",
+  "service_boundary": "org.tronix.bang.udp 1.0.0 receives and scoped-calls org.tronix.bang.stream 1.0.0; old Tronix operation ABI untouched",
+  "runs": [
+    {
+      "schema": "tronix.bang.udp-celix-process.v1",
+      "outcome": "PASS",
+      "independentCelixProcesses": 2,
+      "udpPackets": 6,
+      "udpOptInRequired": true,
+      "malformedPacketsRejected": 2,
+      "signedEvents": 2,
+      "subscribers": 2,
+      "rejectedReplay": 1,
+      "rejectedForgedEvent": 1,
+      "transport": "IPv6 loopback binary UDP",
+      "onAir": false,
+      "threadTransport": false,
+      "notes": "No real OpenThread UDP integration, no deployed key provisioning, no private caption encryption or human receipt"
+    },
+    {
+      "schema": "tronix.bang.udp-celix-process.v1",
+      "outcome": "PASS",
+      "independentCelixProcesses": 2,
+      "udpPackets": 6,
+      "udpOptInRequired": true,
+      "malformedPacketsRejected": 2,
+      "signedEvents": 2,
+      "subscribers": 2,
+      "rejectedReplay": 1,
+      "rejectedForgedEvent": 1,
+      "transport": "IPv6 loopback binary UDP",
+      "onAir": false,
+      "threadTransport": false,
+      "notes": "No real OpenThread UDP integration, no deployed key provisioning, no private caption encryption or human receipt"
+    },
+    {
+      "schema": "tronix.bang.udp-celix-process.v1",
+      "outcome": "PASS",
+      "independentCelixProcesses": 2,
+      "udpPackets": 6,
+      "udpOptInRequired": true,
+      "malformedPacketsRejected": 2,
+      "signedEvents": 2,
+      "subscribers": 2,
+      "rejectedReplay": 1,
+      "rejectedForgedEvent": 1,
+      "transport": "IPv6 loopback binary UDP",
+      "onAir": false,
+      "threadTransport": false,
+      "notes": "No real OpenThread UDP integration, no deployed key provisioning, no private caption encryption or human receipt"
+    }
+  ],
+  "verified_checks": [
+    "two separate native C processes each load their own Celix stream and UDP bundles",
+    "loopback port allocated dynamically, ::1 only, explicit activation gate",
+    "binary signed events carried over UDP without CLI ASCII-hex encoding",
+    "sequence #2 precedes #1 and is reordered before subscriber delivery",
+    "two consumers receive both signed events",
+    "replayed event rejected and publisher-signature-tampered event rejected",
+    "UDP service runs no independent unbounded receive thread",
+    "oversized UDP datagram rejected by MSG_TRUNC receive-length limit",
+    "malformed binary event header rejected before signed-stream admission"
+  ],
+  "unverified": [
+    "actual OpenThread POSIX UDP network delivery from native C service",
+    "physical Thread or LoRa radio, MTU reliability or congestion",
+    "production key provisioning, device identity, transcript encryption",
+    "live ASR/CART source and accessibility presentation or human receipt",
+    "cross-host process-isolation guarantees or production network hardening"
+  ]
+}

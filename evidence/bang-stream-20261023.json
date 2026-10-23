@@ -1,0 +1,70 @@
+{
+  "schema": "tronix.bang.celix-validation.v1",
+  "date": "2026-10-23",
+  "environment": {
+    "host": "butcher",
+    "role": "single-user Linux development machine",
+    "toolchain": "CMake 3.28.3 / Ninja / Node 22.23.3 / OpenSSL 3.0.13",
+    "build_directory_kind": "isolated temporary checkout"
+  },
+  "source": {
+    "tronix_commit": "73c64ee2ddafa9ee74fa8969d964bbec9c139a35",
+    "sixs_commit": "28a664c907d25934b92f3f91055ed8ba7f5b9d6a",
+    "dependency_provenance": "existing locally provisioned Celix and msgpack-c trees, not rebuilt from network-pinned manifest"
+  },
+  "checks": [
+    {
+      "name": "CMake configure plus native Celix bundle/daemon/worker compilation",
+      "result": "pass",
+      "notes": "Tronix scheduler, demo, synthetic 6lowBang, typed 6lowBang stream, daemon, worker and native tests"
+    },
+    {
+      "name": "native standalone 6lowBang stream",
+      "result": "pass",
+      "groups": 6,
+      "notes": "signed fanout, ordering, replay/forgery, missing sequence, queue backpressure, bounded subscribers, malformed channel"
+    },
+    {
+      "name": "native synthetic 6lowBang fixture",
+      "result": "pass",
+      "checks": 3
+    },
+    {
+      "name": "Celix synthetic fixture integration",
+      "result": "pass",
+      "checks": 9,
+      "notes": "normal Tronix scheduler receipt path, two allowlisted research actions"
+    },
+    {
+      "name": "Celix typed-stream registration integration",
+      "result": "pass",
+      "checks": 7,
+      "notes": "fixture disabled by default, service registered alongside demo, legacy operation ABI unchanged, caption injection denied"
+    },
+    {
+      "name": "Tronix existing npm test",
+      "result": "pass",
+      "suites": 7,
+      "notes": "smoke, hardening, ledger, supervised worker, memory, UID authority, peer policy"
+    },
+    {
+      "name": "license verification",
+      "result": "pass",
+      "first_party_source_files": 42
+    },
+    {
+      "name": "git diff --check",
+      "result": "pass"
+    }
+  ],
+  "excluded_claims": [
+    "RF delivery",
+    "Thread UDP caption transmission",
+    "LoRa on air",
+    "speech recognition or translation",
+    "human caption receipt",
+    "end-to-end encryption of private captions",
+    "deployment-grade Celix service authorization",
+    "independent reproducibility of unpinned local build dependencies"
+  ]
+}

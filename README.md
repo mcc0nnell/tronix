@@ -323,6 +323,55 @@ optional `tronix_thread_bundle` target and run `npm run test:thread`.
 It exposes read-only `thread.nodes_up` and `thread.leaders` counts over
 private sockets. This is neither a LoRaWAN gateway nor a deployed radio network.
 
+## 6lowBang native caption fixture (opt-in)
+
+Tronix now has an **experimental Celix adapter linking the 6lowStick C11
+lib6lowBang library** for two fixed synthetic signing/ordering/gap exercises.
+The adapter only returns bounded numeric outcomes through the existing
+single-operation service ABI; **no caption text, audio or radio packets**
+pass through Tronix's job protocol. The library must be supplied from a
+reviewed, pinned 6lowStick source checkout using `TRONIX_BANG_SOURCE`.
+The new **typed C caption service** `org.tronix.bang.stream` is separate from
+the numeric job ABI: it accepts signed event structs, verifies publisher keys,
+fans out to opt-in subscribers, and applies explicit bounded-queue backpressure.
+It is **process-local and experimental**, not on-air caption delivery.
+
+Build the optional `tronix_bang_bundle`, `tronix_bang_stream_bundle`,
+`tronix_bang_fixture_test` and `tronix_bang_stream_test` targets. Run
+`npm run test:bang` for the fixed-operation Celix fixture and
+`npm run test:bang:stream` for optional service registration on a provisioned
+Linux host. Both use a disposable research runtime.
+
+See [6lowBang pilot](docs-bang-pilot.md) for source pinning, test limits,
+backpressure semantics, permission boundaries and the remaining Thread gate.
+## Native C/Celix 6lowBang binary UDP service (opt-in)
+
+Tronix now has an experimental **typed C/Celix UDP transport adapter**.
+Two separate native Celix processes can exchange raw binary, Ed25519-signed
+6lowBang events over **IPv6 loopback**, with subscriber fanout and signature
+verification performed by the registered C caption stream service. The
+original integer-returning Tronix job API never carries caption contents.
+Three disposable-host trials passed, including replay/forgery rejection
+and refusal to activate without the explicit fixture gate.
+
+This is **not yet the OpenThread native radio adapter**: that remains a
+separate integration gate. Build the optional tronix_bang_stream_bundle,
+tronix_bang_udp_bundle and bang-udp-celix-node targets, then run
+npm run test:bang:udp. See
+[the native binary UDP pilot](docs-bang-udp-pilot.md) and
+[the evidence record](evidence/bang-udp-celix-20261023.json).
+
+## 6lowBang transport is maintained in 6lowStick
+
+The C11 signed binary codec, bounded POSIX UDP backend and two-node
+OpenThread POSIX simulator exercise are now **owned by mcc0nnell/6lowstick**
+(PR #32, signed commit 800ec1c). Tronix compiles the pinned 6s libraries
+and only supplies optional Celix services, lifecycle, and subscriber fanout.
+The duplicate Tronix codec and CLI radio harness have been deleted.
+
+The older [OpenThread research note](docs-bang-thread-pilot.md) remains as
+historical simulation evidence, not a physical RF claim.
+
 ## Lightpanda fork backend (opt-in, local fixture)
 
 Tronix can run its existing, restricted `browser.constant` Celix operation

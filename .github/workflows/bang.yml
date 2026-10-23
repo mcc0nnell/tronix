@@ -1,0 +1,47 @@
+# Copyright 2026 Robert McConnell
+# SPDX-License-Identifier: Apache-2.0
+name: 6lowBang fixture
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  synthetic-native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Tronix
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Checkout pinned public 6lowStick C source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: mcc0nnell/6lowstick
+          ref: 800ec1c84cf045362cfe528c2c79008021e2c898
+          path: sixs
+          persist-credentials: false
+      - name: Build standalone C fixture
+        run: |
+          cc -std=c11 -O1 -Wall -Wextra -Wpedantic -Werror \
+            -Iinclude -Isixs/native/bang/include \
+            src/bang_fixture.c tests/bang-fixture.c \
+            sixs/native/bang/src/lowbang.c -lcrypto \
+            -o /tmp/tronix-bang-fixture
+          /tmp/tronix-bang-fixture
+      - name: Native signed caption stream, subscribers and backpressure
+        run: |
+          cc -std=c11 -O1 -Wall -Wextra -Wpedantic -Werror \
+            -Iinclude -Isixs/native/bang/include \
+            src/bang_stream.c tests/bang-stream.c \
+            sixs/native/bang/src/lowbang.c -pthread -lcrypto \
+            -o /tmp/tronix-bang-stream
+          /tmp/tronix-bang-stream
+      - name: Build and verify 6s-owned C codec and transport
+        run: |
+          cmake -S sixs/native/bang -B "$RUNNER_TEMP/sixs-bang" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/sixs-bang" --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/sixs-bang" --output-on-failure
+      - name: Verify project licensing
+        run: npm run license:check

@@ -500,17 +500,18 @@ void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
 }
 }
 int main(int argc,char** argv){
-    if(argc<7 || argc>23 || argc%2==0 || std::strcmp(argv[1],"--socket")!=0||
+    if(argc<7 || argc>25 || argc%2==0 || std::strcmp(argv[1],"--socket")!=0||
        std::strcmp(argv[3],"--scheduler")!=0||std::strcmp(argv[5],"--adapter")!=0){
-        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy] [--policy PRIVATE.policy] [--adapter-sha256 LOWERCASE_SHA256] [--grants PRIVATE.grants --evidence NEW.receipts --evidence-key PRIVATE.key]\n");
+        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy] [--policy PRIVATE.policy] [--adapter-sha256 LOWERCASE_SHA256] [--bang-stream /absolute/tronix_bang_stream.zip] [--grants PRIVATE.grants --evidence NEW.receipts --evidence-key PRIVATE.key]\n");
         return 2;
     }
-    std::string journal_path,worker_binary,memory_path,authority_path,policy_path,adapter_sha256;
+    std::string journal_path,worker_binary,memory_path,authority_path,policy_path,adapter_sha256,bang_stream_path;
     std::string grants_path,evidence_path,evidence_key_path;
     for(int i=7;i<argc;i+=2){
         const std::string option=argv[i],value=argv[i+1];
         if(option=="--journal" && journal_path.empty())journal_path=value;
         else if(option=="--worker" && worker_binary.empty())worker_binary=value;
+        else if(option=="--bang-stream" && bang_stream_path.empty())bang_stream_path=value;
         else if(option=="--memory" && memory_path.empty())memory_path=value;
         else if(option=="--authority" && authority_path.empty())authority_path=value;
         else if(option=="--policy" && policy_path.empty())policy_path=value;
@@ -522,6 +523,13 @@ int main(int argc,char** argv){
         else return 2;
     }
     if(!authority_path.empty() && !policy_path.empty())return 2;
+    // This fixture bundle provides an in-process typed service. Do not mix
+    // it with supervised or multi-identity execution pending real policy work.
+    if(!bang_stream_path.empty() && (!worker_binary.empty() ||
+       !authority_path.empty() || !policy_path.empty() || !grants_path.empty()))return 2;
+    if(!bang_stream_path.empty() &&
+       (!std::getenv("TRONIX_BANG_STREAM_ENABLE_FIXTURE") ||
+        std::strcmp(std::getenv("TRONIX_BANG_STREAM_ENABLE_FIXTURE"),"1")!=0))return 2;
     const bool grants_enabled=!grants_path.empty();
     if(grants_enabled != !evidence_path.empty() ||
        grants_enabled != !evidence_key_path.empty() ||
@@ -531,6 +539,7 @@ int main(int argc,char** argv){
        (!journal_path.empty() && journal_path[0]!='/') ||
        (!memory_path.empty() && memory_path[0]!='/') ||
        (!authority_path.empty() && authority_path[0]!='/') ||
+       (!bang_stream_path.empty() && bang_stream_path[0]!='/') ||
        (!policy_path.empty() && policy_path[0]!='/') ||
        (!grants_path.empty() && grants_path[0]!='/') ||
        (!evidence_path.empty() && evidence_path[0]!='/') ||
@@ -625,7 +634,10 @@ int main(int argc,char** argv){
         std::filesystem::remove_all(cache);return 3;
     }
     if(celix_bundleContext_installBundle(ctx,argv[4],true)<0 ||
-       (worker_binary.empty() && celix_bundleContext_installBundle(ctx,verified_adapter.c_str(),true)<0)){
+       (worker_binary.empty() &&
+        celix_bundleContext_installBundle(ctx,verified_adapter.c_str(),true)<0) ||
+       (!bang_stream_path.empty() &&
+        celix_bundleContext_installBundle(ctx,bang_stream_path.c_str(),true)<0)){
         std::fprintf(stderr,"bundle installation failed\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;
     }
@@ -635,6 +647,23 @@ int main(int argc,char** argv){
         ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
+    // Register the new typed Celix service independently of the existing
+    // integer-returning operation service. This checks registration only:
+    // data-plane receipt is tested in the standalone C protocol suite.
+    if(!bang_stream_path.empty()) {
+        bool registered=false;
+        celix_service_use_options_t opts{};
+        opts.filter.serviceName="org.tronix.bang.stream";
+        opts.filter.versionRange="[1.0.0,2.0.0)";
+        opts.callbackHandle=&registered;
+        opts.use=[](void* handle,void*){*static_cast<bool*>(handle)=true;};
+        if(!celix_bundleContext_useServiceWithOptions(ctx,&opts) || !registered) {
+            std::fprintf(stderr,"required 6lowBang stream service missing\n");
+            celix_frameworkFactory_destroyFramework(framework);
+            std::filesystem::remove_all(cache);
+            return 3;
+        }
+    }
     Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),policy.get(),
                grants.get(),evidence.get(),worker_binary,verified_adapter,adapter_sha256,policies};
     std::thread work(worker,&rt);
@@ -648,7 +677,9 @@ int main(int argc,char** argv){
         if(bound){chmod(path.c_str(),0600);if(listen(fd,128)!=0)bound=false;}
     }
     if(bound){
-        std::printf("TRONIX_READY %s\n",path.c_str());std::fflush(stdout);
+        std::printf("TRONIX_READY %s\n",path.c_str());
+        if(!bang_stream_path.empty())std::printf("TRONIX_BANG_STREAM_READY\n");
+        std::fflush(stdout);
         while(!stop_requested){
             // Finite wait: exit on SIGTERM even if signal() uses SA_RESTART.
             pollfd pfd{fd,POLLIN,0};
