@@ -104,8 +104,13 @@ structures, other signing keys and mismatched supplied artifacts/grants.
 chain integrity for the **presented rows**, not completeness of all executions.
 Truncating final complete rows or replacing a whole valid log with an earlier
 valid prefix is **not detected** without an externally retained terminal
-sequence number and chain-head checkpoint. There is no such external
-checkpoint yet. Host/root compromise, same-UID access to the daemon/key,
+sequence number and chain-head checkpoint. An independently held checkpoint
+can now be created and checked using the separate operator-held
+`scripts/grant_checkpoint.py` helper through
+`scripts/verify_grant_evidence.py` (see
+[docs-evidence-checkpoints.md](docs-evidence-checkpoints.md)). Automatic
+off-host anchoring is **not implemented**. Host/root compromise, same-UID
+access to the daemon/key,
 altered Celix dependencies, or malicious adapters are outside this
 protection. The receipt is emitted after a terminal operation and is not an
 authorization token or a proof that external side effects were safe,
@@ -114,8 +119,9 @@ but previously queued operations are not guaranteed rollback.
 
 On restart use a **new evidence filename**: deliberately no silent reuse,
 reopening or unverified chain continuation. Secure key storage, rotation,
-external checkpoints, durable admission-vs-terminal reconciliation and
-stronger sandboxing are separate release gates.
+automatic publication to an independently protected remote checkpoint
+store, durable admission-vs-terminal reconciliation and stronger sandboxing
+are separate release gates.
 
 ## Validation
 

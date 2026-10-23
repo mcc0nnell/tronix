@@ -10,6 +10,8 @@ import re
 import sys
 import zipfile
 from pathlib import Path
+from grant_checkpoint import (create_checkpoint_file, read_anchor_key,
+                              read_checkpoint_file, sign_checkpoint, verify_checkpoint)
 
 
 def fail(message):
@@ -56,11 +58,12 @@ def read_grants(raw, archive):
     return fields, allowed
 
 
-def verify(key, raw_grants, archive, raw_evidence):
+def verify(key, raw_grants, archive, raw_evidence, checkpoint_sequences=frozenset()):
     fields, allowed = read_grants(raw_grants, archive)
     grant_hash = hashlib.sha256(raw_grants).hexdigest()
     prev = "0" * 64
     count = 0
+    checkpoint_heads = {}
     for line_number, line in enumerate(raw_evidence.splitlines(keepends=True), 1):
         if not line.endswith(b"\n"):
             fail(f"evidence line {line_number}: truncated final record")
@@ -100,9 +103,11 @@ def verify(key, raw_grants, archive, raw_evidence):
             fail(f"evidence line {line_number}: HMAC mismatch")
         prev = mac
         count += 1
+        if count in checkpoint_sequences:
+            checkpoint_heads[count] = mac
     if count == 0:
         fail("no terminal receipts present")
-    return count, prev, grant_hash, fields["artifact"]
+    return count, prev, grant_hash, fields["artifact"], checkpoint_heads
 
 
 def main():
@@ -111,18 +116,54 @@ def main():
     parser.add_argument("--grants", required=True)
     parser.add_argument("--adapter", required=True)
     parser.add_argument("--evidence", required=True)
+    checkpoints = parser.add_mutually_exclusive_group()
+    checkpoints.add_argument("--checkpoint", action="append", default=[],
+                             help="One or more separately retained operator checkpoints")
+    checkpoints.add_argument("--write-checkpoint", metavar="NEW_FILE",
+                             help="Create an operator-signed checkpoint; export it off-host")
+    parser.add_argument("--checkpoint-key",
+                        help="Separate, owner-private 32-byte operator checkpoint signing key")
     args = parser.parse_args()
     try:
         key = Path(args.key).read_bytes()
         if len(key) != 32:
             fail("verification key must contain 32 bytes")
-        count, head, grant, artifact = verify(
+        uses_checkpoints = bool(args.checkpoint or args.write_checkpoint)
+        if uses_checkpoints != bool(args.checkpoint_key):
+            fail("checkpoint operations require an independent --checkpoint-key")
+        operator_key = read_anchor_key(args.checkpoint_key) if uses_checkpoints else None
+        if operator_key is not None and hmac.compare_digest(operator_key, key):
+            fail("operator checkpoint key must differ from daemon receipt key")
+        checkpoints = []
+        if len(args.checkpoint) > 64:
+            fail("too many operator checkpoints")
+        for path in args.checkpoint:
+            checkpoints.append(verify_checkpoint(read_checkpoint_file(path), operator_key))
+        sequences = {c["sequence"] for c in checkpoints}
+        count, head, grant, artifact, heads = verify(
             key, Path(args.grants).read_bytes(), Path(args.adapter).read_bytes(),
-            Path(args.evidence).read_bytes())
+            Path(args.evidence).read_bytes(), sequences)
+        for checkpoint in checkpoints:
+            position = checkpoint["sequence"]
+            if position > count:
+                fail("receipt rollback or truncation below independent checkpoint")
+            if (checkpoint["chainHead"] != heads[position]
+                    or checkpoint["grantSha256"] != grant
+                    or checkpoint["artifactSha256"] != artifact):
+                fail("verified receipt chain diverges from independent checkpoint")
+        if args.write_checkpoint:
+            raw = sign_checkpoint(operator_key, count, head, grant, artifact)
+            create_checkpoint_file(args.write_checkpoint, raw)
         print(json.dumps({"schema": "tronix.grant-evidence.v1", "verified": count,
                           "chainHead": head, "grantSha256": grant,
                           "artifactSha256": artifact,
-                          "limitations": "No rollback or completeness protection without external checkpoint"},
+                          "checkpointMode": ("created" if args.write_checkpoint else
+                                             "verified" if checkpoints else "none"),
+                          "anchoredPrefix": max(sequences, default=0),
+                          "checkpointCount": len(checkpoints),
+                          "limitations": ("Only independently retained checkpoints prevent "
+                                          "undetected rollback of an anchored prefix; "
+                                          "later uncheckpointed suffixes remain unprotected")},
                          indent=2))
     except Exception as exc:
         print(f"TRONIX EVIDENCE REJECTED: {exc}", file=sys.stderr)
