@@ -38,5 +38,19 @@ jobs:
             sixs/native/bang/src/lowbang.c -pthread -lcrypto \
             -o /tmp/tronix-bang-stream
           /tmp/tronix-bang-stream
+      - name: Check bounded C packet codec and authenticated subscriber delivery
+        run: |
+          cc -std=c11 -D_POSIX_C_SOURCE=200809L -O1 -Wall -Wextra -Wpedantic -Werror \
+            -Iinclude -Isixs/native/bang/include \
+            src/bang_wire.c src/bang_stream.c src/bang_thread_codec.c \
+            sixs/native/bang/src/lowbang.c -pthread -lcrypto \
+            -o /tmp/tronix-bang-thread-codec
+          /tmp/tronix-bang-thread-codec selftest
+          emitted="$(/tmp/tronix-bang-thread-codec emit)"
+          frame1="$(printf '%s\n' "$emitted" | sed -n 's/^FRAME1=//p')"
+          frame2="$(printf '%s\n' "$emitted" | sed -n 's/^FRAME2=//p')"
+          test -n "$frame1" && test -n "$frame2"
+          /tmp/tronix-bang-thread-codec verify-gap "$frame2"
+          /tmp/tronix-bang-thread-codec verify "$frame2" "$frame1"
       - name: Verify project licensing
         run: npm run license:check

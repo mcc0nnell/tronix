@@ -1,0 +1,99 @@
+{
+  "schema": "tronix.bang.thread-posix.evidence.v1",
+  "date": "2026-10-23",
+  "host": "butcher single-user Linux development environment",
+  "6lowstick_commit": "28a664c907d25934b92f3f91055ed8ba7f5b9d6a",
+  "openthread_posix_binary_sha256": "09d0d9ad021c3ab9860a1497a5b0fde607c78b1a86fe765e20f788fd2b692f12",
+  "openthread_source_context": "existing local lab binary; independent hermetic source-build provenance not established",
+  "transport": "two OpenThread POSIX simulated-radio nodes over local UDP, 266 ASCII hex characters per 133-byte binary signed C event",
+  "simulator_flash": "fresh isolated private per-trial directory",
+  "runs": [
+    {
+      "checks": [
+        "fresh, bounded Thread test dataset",
+        "two distinct OpenThread POSIX nodes converged",
+        "receiver exposes a mesh-local IPv6 address",
+        "native C source generated two bounded signed packets",
+        "small UDP datagram received before signed-event traffic",
+        "packet #2 delivered over simulated OpenThread UDP",
+        "withheld caption #1 explicitly reported missing by C stream hub",
+        "packet #1 delivered over simulated OpenThread UDP",
+        "C stream hub authenticated, reordered, fanned out and rejected forgeries"
+      ],
+      "udpApplicationBytes": [
+        266,
+        266
+      ],
+      "sendAttempts": [
+        1,
+        1
+      ],
+      "measuredProcessSendToReceiveMs": [
+        2.208,
+        4.594
+      ],
+      "outcome": "PASS"
+    },
+    {
+      "checks": [
+        "fresh, bounded Thread test dataset",
+        "two distinct OpenThread POSIX nodes converged",
+        "receiver exposes a mesh-local IPv6 address",
+        "native C source generated two bounded signed packets",
+        "small UDP datagram received before signed-event traffic",
+        "packet #2 delivered over simulated OpenThread UDP",
+        "withheld caption #1 explicitly reported missing by C stream hub",
+        "packet #1 delivered over simulated OpenThread UDP",
+        "C stream hub authenticated, reordered, fanned out and rejected forgeries"
+      ],
+      "udpApplicationBytes": [
+        266,
+        266
+      ],
+      "sendAttempts": [
+        1,
+        1
+      ],
+      "measuredProcessSendToReceiveMs": [
+        4.195,
+        5.905
+      ],
+      "outcome": "PASS"
+    },
+    {
+      "checks": [
+        "fresh, bounded Thread test dataset",
+        "two distinct OpenThread POSIX nodes converged",
+        "receiver exposes a mesh-local IPv6 address",
+        "native C source generated two bounded signed packets",
+        "small UDP datagram received before signed-event traffic",
+        "packet #2 delivered over simulated OpenThread UDP",
+        "withheld caption #1 explicitly reported missing by C stream hub",
+        "packet #1 delivered over simulated OpenThread UDP",
+        "C stream hub authenticated, reordered, fanned out and rejected forgeries"
+      ],
+      "udpApplicationBytes": [
+        266,
+        266
+      ],
+      "sendAttempts": [
+        1,
+        1
+      ],
+      "measuredProcessSendToReceiveMs": [
+        6.414,
+        5.294
+      ],
+      "outcome": "PASS"
+    }
+  ],
+  "verification": "C signed-event codec, C tronix_bang_hub two-subscriber delivery and reorder, forgery/replay rejection, deliberately withheld first caption gap",
+  "caveats": [
+    "No physical RF, LoRa, RCP, ASR, phone UI, end-user caption receipt, production encryption or live alert dispatch",
+    "Simulated application UDP packets are CLI ASCII hex, not production RF binary frames",
+    "Previous runs with reused local simulator flash sometimes did not receive even a small UDP probe despite mesh attachment; fresh flash gave three successive passes but does not prove universal reliability",
+    "Short local process-observed times are not radio latency or a validated SLO",
+    "Deliberately withheld caption #1 is not actual network packet loss",
+    "Registered Celix service tested separately; this two-node lab calls its C stream core in a standalone verifier process"
+  ]
+}

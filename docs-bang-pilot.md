@@ -120,3 +120,15 @@ physical RF or end-user device; no SLA or safety claim is warranted.**
 ## Next gate
 
 The **typed, bounded C caption service interface now exists**, but full native Celix service activation has not been validated by GitHub CI. Next: independently build and verify that integration on a provisioned host, then connect an authorized OpenThread POSIX UDP transport, measure process-side latency and loss/reordering, and design a compact radio codec. The existing `docs-thread-pilot.md` is read-only telemetry, not caption delivery. Hardware RF, ASR/translation, encryption of private captions and human comprehension remain unverified.
+
+
+## Signed OpenThread simulation milestone
+
+A separate two-node OpenThread POSIX UDP lab now transports signed caption
+events and validates them against the actual C11 stream hub. See
+[the signed OpenThread transport pilot](docs-bang-thread-pilot.md) and
+[local trial evidence](evidence/bang-thread-20261023.json).
+
+This standalone radio test is independent of the actual Celix bundle
+registration test. Neither test has yet connected the registered Celix
+service to a production socket, physical RF transceiver or caption display.

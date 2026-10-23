@@ -274,6 +274,22 @@ Linux host. Both use a disposable research runtime.
 
 See [6lowBang pilot](docs-bang-pilot.md) for source pinning, test limits,
 backpressure semantics, permission boundaries and the remaining Thread gate.
+## OpenThread × 6lowBang signed caption laboratory
+
+A new native C11 signed-event wire codec and two-node OpenThread POSIX UDP
+simulation have passed three consecutive fresh-flash local trials. Events
+traversed a simulated Thread network in deliberately reversed sequence and
+were validated, ordered and delivered to two subscribers by the C stream hub.
+This was **not an on-air test or a live caption service**. The CLI lab sends
+inefficient ASCII hex, and fresh isolated OpenThread flash is essential to
+the recorded repeat trials.
+
+Build the optional bang-thread-codec target and run the native selftest with
+npm run test:bang:codec. The separate two-node lab uses npm run test:bang:thread
+with a reviewed OT_CLI_PATH and BANG_THREAD_CODEC. See
+[the signed OpenThread pilot](docs-bang-thread-pilot.md) and
+[recorded evidence](evidence/bang-thread-20261023.json).
+
 ## Lightpanda fork backend (opt-in, local fixture)
 
 Tronix can run its existing, restricted `browser.constant` Celix operation
