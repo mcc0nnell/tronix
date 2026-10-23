@@ -3,6 +3,7 @@
 // TRONIX opt-in one-shot Celix operation worker.
 // This is fault and timeout containment, NOT a security sandbox.
 #include "tronix_service.h"
+#include "archive_identity.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
 #include <celix_framework.h>
@@ -78,17 +79,21 @@ bool op_valid(const std::string& name){
     return true;
 }
 int main(int argc,char** argv) {
-    const bool inspect=argc==6 &&
+    const bool inspect=(argc==6||argc==8) &&
         std::strcmp(argv[1],"--adapter")==0 &&
         std::strcmp(argv[3],"--cache")==0 &&
         std::strcmp(argv[5],"--inspect")==0;
-    const bool execute=argc==11 &&
+    const bool execute=(argc==11||argc==13) &&
         std::strcmp(argv[1],"--adapter")==0 &&
         std::strcmp(argv[3],"--operation")==0 &&
         std::strcmp(argv[5],"--cache")==0 &&
         std::strcmp(argv[7],"--lane")==0 &&
         std::strcmp(argv[9],"--budget-ms")==0;
     if(!inspect&&!execute)return 2;
+    const bool pinned=inspect?argc==8:argc==13;
+    if(pinned && std::strcmp(argv[argc-2],"--adapter-sha256")!=0)return 2;
+    const std::string pinned_sha256=pinned?argv[argc-1]:"";
+    if(pinned && !tronix::valid_sha256(pinned_sha256))return 2;
     const std::string adapter=argv[2],op=execute?argv[4]:"",cache=inspect?argv[4]:argv[6];
     int expected_lane=-1;
     unsigned long expected_budget=0;
@@ -118,7 +123,14 @@ int main(int argc,char** argv) {
     auto* framework=celix_frameworkFactory_createFramework(cfg);
     if(!framework)return 5;
     auto* ctx=celix_framework_getFrameworkContext(framework);
-    if(celix_bundleContext_installBundle(ctx,adapter.c_str(),true)<0){
+    std::string verified_adapter;
+    try { verified_adapter=tronix::snapshot_adapter(adapter,cache,pinned_sha256); }
+    catch(const std::exception& e){
+        std::fprintf(stderr,"adapter identity verification failed: %s\n",e.what());
+        celix_frameworkFactory_destroyFramework(framework);
+        return 6;
+    }
+    if(celix_bundleContext_installBundle(ctx,verified_adapter.c_str(),true)<0){
         celix_frameworkFactory_destroyFramework(framework);
         return 6;
     }
