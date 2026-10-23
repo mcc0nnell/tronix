@@ -253,6 +253,19 @@ optional `tronix_thread_bundle` target and run `npm run test:thread`.
 It exposes read-only `thread.nodes_up` and `thread.leaders` counts over
 private sockets. This is neither a LoRaWAN gateway nor a deployed radio network.
 
+## 6lowBang native caption fixture (opt-in)
+
+Tronix now has an **experimental Celix adapter linking the 6lowStick C11
+lib6lowBang library** for two fixed synthetic signing/ordering/gap exercises.
+The adapter only returns bounded numeric outcomes through the existing
+single-operation service ABI; **no caption text, audio or radio packets**
+pass through Tronix's job protocol. The library must be supplied from a
+reviewed, pinned 6lowStick source checkout using `TRONIX_BANG_SOURCE`.
+Build the optional `tronix_bang_bundle` and `tronix_bang_fixture_test` targets,
+then run `npm run test:bang` in a provisioned research lab.
+See [6lowBang pilot](docs-bang-pilot.md) for source pinning, permissions,
+execution limits, the standalone GitHub CI coverage, and the separate
+streaming/Thread integration gates.
 ## Lightpanda fork backend (opt-in, local fixture)
 
 Tronix can run its existing, restricted `browser.constant` Celix operation
