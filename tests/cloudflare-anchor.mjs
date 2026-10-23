@@ -67,6 +67,18 @@ check('GET rejects invalid query',(await get(path+'?verbose=1')).status===400);
 check('GET rejects malformed sequence',(await get(path+'?sequence=1x')).status===400);
 check('GET rejects negative sequence',(await get(path+'?sequence=-1')).status===400);
 check('POST unauthorized without publisher token',(await post(third,'invalid')).status===401);
+const streamedTooLarge=await sink.fetch(new Request(base+'/v1/checkpoints',{
+  method:'POST',
+  body:new ReadableStream({start(controller){
+    controller.enqueue(new TextEncoder().encode('x'.repeat(2500)));
+    controller.close();
+  }}),
+  duplex:'half',
+  headers:{authorization:'Bearer '+publish,'content-type':'application/json'}
+}),env);
+check('chunked checkpoint exceeding 2KiB rejected without Content-Length',
+  streamedTooLarge.status===413);
+check('oversized checkpoint does not touch the database',env.DB.rows.length===2);
 check('GET unauthorized without reader token',(await get(path,'invalid')).status===401);
 check('wrong endpoint refused',(await get('/v1/anything')).status===404);
 check('signature alteration refused',(await post(two.replace('"sequence":2','"sequence":3'))).status===403);

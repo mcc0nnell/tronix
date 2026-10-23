@@ -52,6 +52,29 @@ async function checkSignature(item,secret){
   return crypto.subtle.verify('HMAC',key,bytes(signature),utf8.encode(body));
 }
 function auth(req,token){return equal(req.headers.get('authorization'),'Bearer '+token);}
+async function boundedBody(request, cap=2048){
+  const reader=request.body?.getReader();
+  if(!reader)return {error:'INVALID_BODY'};
+  let total=0,parts=[];
+  try{
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      total+=value.byteLength;
+      if(total>cap){
+        await reader.cancel();
+        return {error:'TOO_LARGE'};
+      }
+      parts.push(value);
+    }
+    const joined=new Uint8Array(total);
+    let index=0;
+    for(const part of parts){joined.set(part,index);index+=part.byteLength;}
+    return {text:new TextDecoder('utf-8',{fatal:true}).decode(joined)};
+  }catch{
+    return {error:'INVALID_BODY'};
+  }finally{try{reader.releaseLock();}catch{}}
+}
 export default {
   async fetch(request,env){
     if(!configured(env))return json({error:'NOT_CONFIGURED'},503);
@@ -64,8 +87,10 @@ export default {
         return json({error:'CONTENT_TYPE_REQUIRED'},415);
       if(Number(request.headers.get('content-length')||0)>2048)
         return json({error:'TOO_LARGE'},413);
-      let raw;
-      try{raw=await request.text();}catch{return json({error:'INVALID_BODY'},400);}
+      const bounded=await boundedBody(request);
+      if(bounded.error==='TOO_LARGE')return json({error:'TOO_LARGE'},413);
+      if(bounded.error)return json({error:'INVALID_BODY'},400);
+      const raw=bounded.text;
       const item=parse(raw);
       if(!item)return json({error:'INVALID_CHECKPOINT'},400);
       if(!await checkSignature(item,env.CHECKPOINT_HMAC_KEY_HEX))
