@@ -41,7 +41,8 @@ inline WorkerOutcome supervise(const std::string& binary,
                                uint32_t budget_ms,
                                const std::atomic<bool>& running,
                                bool inspect=false,
-                               int expected_lane=-1) {
+                               int expected_lane=-1,
+                               const std::string& pinned_sha256="") {
     WorkerOutcome result;
     char cache_name[]="/tmp/tronix-worker-XXXXXX";
     if(!mkdtemp(cache_name))return result;
@@ -94,6 +95,8 @@ inline WorkerOutcome supervise(const std::string& binary,
         const_cast<char*>(lane_arg.c_str()),
         const_cast<char*>("--budget-ms"),
         const_cast<char*>(budget_arg.c_str()),
+        const_cast<char*>(pinned_sha256.empty()?nullptr:"--adapter-sha256"),
+        const_cast<char*>(pinned_sha256.empty()?nullptr:pinned_sha256.c_str()),
         nullptr
     };
     char* const inspect_args[]{
@@ -103,6 +106,8 @@ inline WorkerOutcome supervise(const std::string& binary,
         const_cast<char*>("--cache"),
         const_cast<char*>(cache.c_str()),
         const_cast<char*>("--inspect"),
+        const_cast<char*>(pinned_sha256.empty()?nullptr:"--adapter-sha256"),
+        const_cast<char*>(pinned_sha256.empty()?nullptr:pinned_sha256.c_str()),
         nullptr
     };
     // Credentials and inherited environment are not forwarded.
@@ -230,7 +235,8 @@ inline WorkerOutcome supervise(const std::string& binary,
 }
 inline WorkerOutcome inspect_policy(const std::string& binary,
                                     const std::string& adapter,
-                                    const std::atomic<bool>& running){
-    return supervise(binary,adapter,"",0,running,true);
+                                    const std::atomic<bool>& running,
+                                    const std::string& pinned_sha256=""){
+    return supervise(binary,adapter,"",0,running,true,-1,pinned_sha256);
 }
 } // namespace tronix
