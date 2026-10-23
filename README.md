@@ -261,11 +261,19 @@ The adapter only returns bounded numeric outcomes through the existing
 single-operation service ABI; **no caption text, audio or radio packets**
 pass through Tronix's job protocol. The library must be supplied from a
 reviewed, pinned 6lowStick source checkout using `TRONIX_BANG_SOURCE`.
-Build the optional `tronix_bang_bundle` and `tronix_bang_fixture_test` targets,
-then run `npm run test:bang` in a provisioned research lab.
-See [6lowBang pilot](docs-bang-pilot.md) for source pinning, permissions,
-execution limits, the standalone GitHub CI coverage, and the separate
-streaming/Thread integration gates.
+The new **typed C caption service** `org.tronix.bang.stream` is separate from
+the numeric job ABI: it accepts signed event structs, verifies publisher keys,
+fans out to opt-in subscribers, and applies explicit bounded-queue backpressure.
+It is **process-local and experimental**, not on-air caption delivery.
+
+Build the optional `tronix_bang_bundle`, `tronix_bang_stream_bundle`,
+`tronix_bang_fixture_test` and `tronix_bang_stream_test` targets. Run
+`npm run test:bang` for the fixed-operation Celix fixture and
+`npm run test:bang:stream` for optional service registration on a provisioned
+Linux host. Both use a disposable research runtime.
+
+See [6lowBang pilot](docs-bang-pilot.md) for source pinning, test limits,
+backpressure semantics, permission boundaries and the remaining Thread gate.
 ## Lightpanda fork backend (opt-in, local fixture)
 
 Tronix can run its existing, restricted `browser.constant` Celix operation
