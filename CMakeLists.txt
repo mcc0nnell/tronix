@@ -53,7 +53,11 @@ target_link_libraries(tronix_worker PRIVATE Celix::framework OpenSSL::Crypto)
 add_executable(tronixd src/tronixd.cc)
 target_include_directories(tronixd PRIVATE include "${MSGPACK_SOURCE}/include")
 target_compile_definitions(tronixd PRIVATE MSGPACK_NO_BOOST=1)
-target_link_libraries(tronixd PRIVATE Celix::framework pthread OpenSSL::Crypto)
+if(NOT LIBZIP_LIBRARY OR NOT JANSSON_LIBRARY)
+  message(FATAL_ERROR "Celix's selected libzip and Jansson libraries must be available")
+endif()
+target_link_libraries(tronixd PRIVATE Celix::framework pthread OpenSSL::Crypto
+  "${LIBZIP_LIBRARY}" "${JANSSON_LIBRARY}")
 set_target_properties(tronixd PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}/apache-celix/libs/framework;${CMAKE_BINARY_DIR}/apache-celix/libs/utils")
 file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tronix-paths.env"
   CONTENT "worker=$<TARGET_FILE:tronix_worker>\ndaemon=$<TARGET_FILE:tronixd>\nscheduler=$<TARGET_PROPERTY:tronix_scheduler,BUNDLE_FILE>\ndemo=$<TARGET_PROPERTY:tronix_demo,BUNDLE_FILE>\n")

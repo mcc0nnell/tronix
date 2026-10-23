@@ -8,6 +8,8 @@
 #include "authority.hpp"
 #include "peer_policy.hpp"
 #include "archive_identity.hpp"
+#include "capability_grants.hpp"
+#include "grant_evidence.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
 #include <celix_framework.h>
@@ -60,6 +62,8 @@ struct Runtime {
     tronix::AgentMemory* memory;
     const tronix::Authority* authority;
     const tronix::PeerPolicy* policy;
+    const tronix::CapabilityGrants* grants;
+    tronix::GrantEvidence* evidence;
     std::string worker_binary;
     std::string adapter_path;
     std::string adapter_sha256;
@@ -108,6 +112,11 @@ void worker(Runtime* r){
                 if(!r->ledger->emit(j.id,j.agent,j.operation,state,j.dispatch_seq,
                                      terminal.state==TRONIX_DONE,terminal.value))
                     std::fprintf(stderr,"TRONIX_LEDGER_ERROR terminal %s\n",j.id);
+                if(r->evidence && !r->evidence->append(j.id,j.agent,j.operation,
+                       state,j.dispatch_seq,terminal.state==TRONIX_DONE,terminal.value)) {
+                    std::fprintf(stderr,"TRONIX_EVIDENCE_ERROR terminal %s; refusing new work\n",j.id);
+                    r->running.store(false,std::memory_order_release);
+                }
             }
         } else {
             std::unique_lock<std::mutex> lock(r->wake_mutex);
@@ -242,6 +251,10 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime,
     if(runtime->policy && q.action=="submit" &&
        !runtime->policy->permits(q.operation))
         return denied("DENIED");
+    if(runtime->grants && q.action=="submit" &&
+       !runtime->grants->permits(q.operation))return denied("DENIED");
+    if(runtime->evidence && q.action=="submit" &&
+       !runtime->evidence->healthy())return denied("EVIDENCE_UNAVAILABLE");
     msgpack::sbuffer b;P pk(b);
     if(q.action=="ping"){
         pk.pack_map(3);key(pk,"v");pk.pack(1);key(pk,"ok");pk.pack(true);
@@ -264,11 +277,12 @@ std::string reply(celix_bundle_context_t* ctx,const Request& q,Runtime* runtime,
                 pos=end+1;
             }
         }
-        if(restricted || runtime->policy){
+        if(restricted || runtime->policy || runtime->grants){
             std::vector<std::string> permitted;
             for(const auto& op:ops)
                 if((!restricted || caller->allows(op)) &&
-                   (!runtime->policy || runtime->policy->permits(op)))
+                   (!runtime->policy || runtime->policy->permits(op)) &&
+                   (!runtime->grants || runtime->grants->permits(op)))
                     permitted.push_back(op);
             ops=std::move(permitted);
         }
@@ -486,12 +500,13 @@ void handle(int fd,celix_bundle_context_t* ctx,Runtime* runtime){
 }
 }
 int main(int argc,char** argv){
-    if(argc<7 || argc>17 || argc%2==0 || std::strcmp(argv[1],"--socket")!=0||
+    if(argc<7 || argc>23 || argc%2==0 || std::strcmp(argv[1],"--socket")!=0||
        std::strcmp(argv[3],"--scheduler")!=0||std::strcmp(argv[5],"--adapter")!=0){
-        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy] [--policy PRIVATE.policy] [--adapter-sha256 LOWERCASE_SHA256]\n");
+        std::fprintf(stderr,"usage: tronixd --socket PRIVATE.sock --scheduler scheduler.zip --adapter adapter.zip [--journal PRIVATE.events] [--worker /absolute/tronix_worker] [--memory PRIVATE.mem] [--authority PRIVATE.policy] [--policy PRIVATE.policy] [--adapter-sha256 LOWERCASE_SHA256] [--grants PRIVATE.grants --evidence NEW.receipts --evidence-key PRIVATE.key]\n");
         return 2;
     }
     std::string journal_path,worker_binary,memory_path,authority_path,policy_path,adapter_sha256;
+    std::string grants_path,evidence_path,evidence_key_path;
     for(int i=7;i<argc;i+=2){
         const std::string option=argv[i],value=argv[i+1];
         if(option=="--journal" && journal_path.empty())journal_path=value;
@@ -501,15 +516,25 @@ int main(int argc,char** argv){
         else if(option=="--policy" && policy_path.empty())policy_path=value;
         else if(option=="--adapter-sha256" && adapter_sha256.empty() &&
                 tronix::valid_sha256(value))adapter_sha256=value;
+        else if(option=="--grants" && grants_path.empty())grants_path=value;
+        else if(option=="--evidence" && evidence_path.empty())evidence_path=value;
+        else if(option=="--evidence-key" && evidence_key_path.empty())evidence_key_path=value;
         else return 2;
     }
     if(!authority_path.empty() && !policy_path.empty())return 2;
+    const bool grants_enabled=!grants_path.empty();
+    if(grants_enabled != !evidence_path.empty() ||
+       grants_enabled != !evidence_key_path.empty() ||
+       (grants_enabled && (worker_binary.empty() || adapter_sha256.empty())))return 2;
     if((!worker_binary.empty() &&
         (worker_binary[0]!='/' || access(worker_binary.c_str(),X_OK)!=0)) ||
        (!journal_path.empty() && journal_path[0]!='/') ||
        (!memory_path.empty() && memory_path[0]!='/') ||
        (!authority_path.empty() && authority_path[0]!='/') ||
-       (!policy_path.empty() && policy_path[0]!='/'))return 2;
+       (!policy_path.empty() && policy_path[0]!='/') ||
+       (!grants_path.empty() && grants_path[0]!='/') ||
+       (!evidence_path.empty() && evidence_path[0]!='/') ||
+       (!evidence_key_path.empty() && evidence_key_path[0]!='/'))return 2;
     const std::string path=argv[2];
     if(path.empty()||path.size()>=sizeof(((sockaddr_un*)0)->sun_path)||path[0]!='/')return 2;
     struct stat st{};
@@ -558,6 +583,15 @@ int main(int argc,char** argv){
         std::filesystem::remove_all(cache);
         return 3;
     }
+    std::unique_ptr<tronix::CapabilityGrants> grants;
+    try {
+        if(grants_enabled)grants=std::make_unique<tronix::CapabilityGrants>(
+            grants_path,verified_adapter,adapter_sha256);
+    }catch(const std::exception& e){
+        std::fprintf(stderr,"capability grants refused: %s\n",e.what());
+        celix_frameworkFactory_destroyFramework(framework);
+        std::filesystem::remove_all(cache);return 3;
+    }
     std::vector<tronix::OperationPolicy> policies;
     if(!worker_binary.empty()){
         const std::atomic<bool> alive{true};
@@ -570,6 +604,26 @@ int main(int argc,char** argv){
         }
         policies=std::move(description.policies);
     }
+    if(grants){
+        for(const auto& op:grants->operations()){
+            const bool listed=std::any_of(policies.begin(),policies.end(),
+                [&](const auto& p){return p.name==op;});
+            if(!listed){
+                std::fprintf(stderr,"grant unavailable in frozen worker policy: %s\n",op.c_str());
+                celix_frameworkFactory_destroyFramework(framework);
+                std::filesystem::remove_all(cache);return 3;
+            }
+        }
+    }
+    std::unique_ptr<tronix::GrantEvidence> evidence;
+    try {
+        if(grants) evidence=std::make_unique<tronix::GrantEvidence>(
+            evidence_path,evidence_key_path,adapter_sha256,grants->digest());
+    }catch(const std::exception& e){
+        std::fprintf(stderr,"evidence setup refused: %s\n",e.what());
+        celix_frameworkFactory_destroyFramework(framework);
+        std::filesystem::remove_all(cache);return 3;
+    }
     if(celix_bundleContext_installBundle(ctx,argv[4],true)<0 ||
        (worker_binary.empty() && celix_bundleContext_installBundle(ctx,verified_adapter.c_str(),true)<0)){
         std::fprintf(stderr,"bundle installation failed\n");
@@ -581,7 +635,8 @@ int main(int argc,char** argv){
         ada=with_service<tronix_operation_service_t>(ctx,TRONIX_OPERATION_SERVICE,[](auto*){});
     if(!sch||!ada){std::fprintf(stderr,"required services missing\n");
         celix_frameworkFactory_destroyFramework(framework);std::filesystem::remove_all(cache);return 3;}
-    Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),policy.get(),worker_binary,verified_adapter,adapter_sha256,policies};
+    Runtime rt{ctx,ledger.get(),memory.get(),authority.get(),policy.get(),
+               grants.get(),evidence.get(),worker_binary,verified_adapter,adapter_sha256,policies};
     std::thread work(worker,&rt);
     std::signal(SIGINT,signal_handler);std::signal(SIGTERM,signal_handler);
     int fd=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);bool bound=false;
