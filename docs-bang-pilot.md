@@ -90,6 +90,33 @@ The `6lowBang fixture` GitHub Actions workflow compiles and tests **both native 
 
 The native Celix runtime supports one operation adapter per invocation. Here it replaces the current Thread/demo/CDP adapter. Supervised workers scrub their environment, so the fixture environment gate is not currently forwarded to a worker; the supplied smoke test runs in-process on a trusted, isolated developer host. Do not treat it as a production sandbox or weaken worker policies to make it start.
 
+## Verified isolated build — October 23, 2026
+
+The pinned Tronix/6lowStick sources were compiled on the single-user
+**Butcher** Linux development host in a disposable worktree. CMake/Ninja
+built the native Celix daemon, scheduler, worker, existing demo adapter,
+synthetic 6lowBang bundle and the new typed stream bundle successfully.
+The installed dependencies were existing local Celix/msgpack-c checkouts,
+so this is **local reproduction, not an independently hermetic build**.
+
+- Native signed stream test: **6/6 groups passed**, including tampering,
+  ordering, explicit overflow backpressure, gap notification and subscriber
+  capacity.
+- Native fixed-operation fixture: **3 checks passed**.
+- Actual native Tronix/Celix synthetic fixture integration:
+  **9/9 checks passed**, with receipts and denial of arbitrary operations.
+- Actual Celix typed caption-service startup: **7/7 checks passed**,
+  including refusal when not opted in, registration alongside the
+  original demo adapter and denial of caption injection through legacy IPC.
+- Existing `npm test`: **all seven configured suites passed** after
+  building the supervised `tronix_worker` executable; licensing passed
+  for 42 first-party source files and `git diff --check` passed.
+
+See [the machine-readable validation record](evidence/bang-stream-20261023.json).
+These results prove local native compilation and process-local tests only.
+**There is still no demonstrated stream across the Thread simulator,
+physical RF or end-user device; no SLA or safety claim is warranted.**
+
 ## Next gate
 
 The **typed, bounded C caption service interface now exists**, but full native Celix service activation has not been validated by GitHub CI. Next: independently build and verify that integration on a provisioned host, then connect an authorized OpenThread POSIX UDP transport, measure process-side latency and loss/reordering, and design a compact radio codec. The existing `docs-thread-pilot.md` is read-only telemetry, not caption delivery. Hardware RF, ASR/translation, encryption of private captions and human comprehension remain unverified.
