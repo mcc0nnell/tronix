@@ -130,6 +130,15 @@ and current trust boundary. See
 [docs-agent-authority.md](docs-agent-authority.md) for the optional
 UID-bound admission policy and its remaining same-UID limitations.
 
+## Celix ecosystem and native CI
+
+The [Celix ecosystem comparison](docs-celix-ecosystem.md) maps TRONIX to
+fineract-celix, SignPipe, iTRS-NG and upstream Apache Celix, with explicit
+component boundaries and a staged capability roadmap. The
+[Native Celix runtime workflow](.github/workflows/native.yml) is intended to
+rebuild pinned dependencies and run the existing native-backed tests on PRs;
+its existence alone is **not** evidence that CI has passed.
+
 ## Proposed IHB fuzzing integration
 
 See [docs-ihb-fuzzing.md](docs-ihb-fuzzing.md) for the proposed campaign
