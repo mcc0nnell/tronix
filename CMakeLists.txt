@@ -77,3 +77,30 @@ add_celix_bundle(tronix_lightpanda_record
 target_include_directories(tronix_lightpanda_record PRIVATE include "${MSGPACK_SOURCE}/include")
 target_compile_definitions(tronix_lightpanda_record PRIVATE MSGPACK_NO_BOOST=1)
 target_link_libraries(tronix_lightpanda_record PRIVATE Celix::framework)
+
+# 6lowBang is a separately reviewed C11 library owned by 6lowStick.
+# OFF by default. No implicit network FetchContent or unpinned vendoring.
+set(TRONIX_BANG_SOURCE "" CACHE PATH "Absolute path to pinned 6lowStick/native/bang source")
+if(TRONIX_BANG_SOURCE)
+  if(NOT IS_ABSOLUTE "${TRONIX_BANG_SOURCE}" OR
+     NOT EXISTS "${TRONIX_BANG_SOURCE}/include/lowbang.h" OR
+     NOT EXISTS "${TRONIX_BANG_SOURCE}/CMakeLists.txt")
+    message(FATAL_ERROR "TRONIX_BANG_SOURCE must be a complete, reviewed native/bang source directory")
+  endif()
+  add_subdirectory("${TRONIX_BANG_SOURCE}" "${CMAKE_BINARY_DIR}/6lowbang-core" EXCLUDE_FROM_ALL)
+  # A static native library is linked into a loadable Celix service bundle.
+  set_target_properties(lowbang PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  add_celix_bundle(tronix_bang
+    VERSION 0.1.0 SYMBOLIC_NAME org.tronix.adapter.bang.synthetic
+    NAME "Tronix 6lowBang synthetic caption admission adapter"
+    FILENAME tronix_bang SOURCES src/bang_adapter.c src/bang_fixture.c)
+  target_include_directories(tronix_bang PRIVATE include)
+  target_link_libraries(tronix_bang PRIVATE Celix::framework lowbang)
+  add_executable(tronix_bang_fixture_test tests/bang-fixture.c src/bang_fixture.c)
+  target_include_directories(tronix_bang_fixture_test PRIVATE include)
+  target_link_libraries(tronix_bang_fixture_test PRIVATE lowbang)
+  add_custom_target(bang_fixture_test
+    COMMAND $<TARGET_FILE:tronix_bang_fixture_test>
+    DEPENDS tronix_bang_fixture_test
+    COMMENT "Exercise the actual 6lowBang C11 protocol without Celix")
+endif()
