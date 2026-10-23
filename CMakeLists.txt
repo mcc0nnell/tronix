@@ -103,4 +103,23 @@ if(TRONIX_BANG_SOURCE)
     COMMAND $<TARGET_FILE:tronix_bang_fixture_test>
     DEPENDS tronix_bang_fixture_test
     COMMENT "Exercise the actual 6lowBang C11 protocol without Celix")
+  # The real signed caption data path is a separate typed Celix service;
+  # never repurpose the integer-returning Tronix operation ABI.
+  find_package(Threads REQUIRED)
+  add_library(tronix_bang_stream_core STATIC src/bang_stream.c)
+  set_target_properties(tronix_bang_stream_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(tronix_bang_stream_core PUBLIC include)
+  target_link_libraries(tronix_bang_stream_core PUBLIC lowbang Threads::Threads)
+  add_celix_bundle(tronix_bang_stream
+    VERSION 0.1.0 SYMBOLIC_NAME org.tronix.bang.stream
+    NAME "Tronix experimental signed C caption stream"
+    FILENAME tronix_bang_stream SOURCES src/bang_stream_adapter.c)
+  target_include_directories(tronix_bang_stream PRIVATE include)
+  target_link_libraries(tronix_bang_stream PRIVATE Celix::framework tronix_bang_stream_core)
+  add_executable(tronix_bang_stream_test tests/bang-stream.c)
+  target_link_libraries(tronix_bang_stream_test PRIVATE tronix_bang_stream_core)
+  add_custom_target(bang_stream_test
+    COMMAND $<TARGET_FILE:tronix_bang_stream_test>
+    DEPENDS tronix_bang_stream_test
+    COMMENT "Test signed C stream subscription and explicit backpressure")
 endif()
