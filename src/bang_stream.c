@@ -28,7 +28,7 @@ static bang_subscription* find_sub(tronix_bang_hub* hub, uint32_t id) {
 }
 static bool channel_subscribed(tronix_bang_hub* hub, const char* channel) {
     for (size_t i=0; i<TRONIX_BANG_MAX_SUBSCRIBERS; ++i)
-        if (hub->subs[i].active && strcmp(hub->subs[i].channel,channel)==0)
+        if (hub->subs[i].active && strncmp(hub->subs[i].channel,channel,BANG_MAX_CHANNEL+1)==0)
             return true;
     return false;
 }
@@ -36,7 +36,7 @@ static bool has_headroom(tronix_bang_hub* hub,const char* channel) {
     bool found=false;
     for (size_t i=0; i<TRONIX_BANG_MAX_SUBSCRIBERS; ++i) {
         const bang_subscription* sub=&hub->subs[i];
-        if (!sub->active || strcmp(sub->channel,channel)!=0) continue;
+        if (!sub->active || strncmp(sub->channel,channel,BANG_MAX_CHANNEL+1)!=0) continue;
         found=true;
         // Reserve a full 32-frame reorder burst BEFORE admission into the
         // 6lowBang receiver. Otherwise verification may consume a frame
@@ -57,7 +57,7 @@ static void distribute(tronix_bang_hub* hub,const char* channel,const bang_deliv
     // Caller holds lock and has reserved BANG_WINDOW capacity per subscriber.
     for (size_t i=0; i<TRONIX_BANG_MAX_SUBSCRIBERS; ++i) {
         bang_subscription* sub=&hub->subs[i];
-        if (!sub->active || strcmp(sub->channel,channel)!=0) continue;
+        if (!sub->active || strncmp(sub->channel,channel,BANG_MAX_CHANNEL+1)!=0) continue;
         for (size_t j=0; j<d->ready_count; ++j) {
             const size_t at=(sub->head+sub->count)%TRONIX_BANG_QUEUE_CAPACITY;
             sub->queue[at]=d->ready[j];
