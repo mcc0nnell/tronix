@@ -16,7 +16,8 @@
     "test:bang": "node tests/bang-live.mjs",
     "test:bang:stream": "node tests/bang-stream-live.mjs",
     "test:bang:thread": "node tests/bang-thread-live.mjs",
-    "test:bang:codec": "./build/bang-thread-codec selftest"
+    "test:bang:codec": "./build/bang-thread-codec selftest",
+    "test:bang:udp": "node tests/bang-udp-celix-live.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "3.1.3"

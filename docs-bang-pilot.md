@@ -132,3 +132,16 @@ events and validates them against the actual C11 stream hub. See
 This standalone radio test is independent of the actual Celix bundle
 registration test. Neither test has yet connected the registered Celix
 service to a production socket, physical RF transceiver or caption display.
+
+
+## Native binary C/Celix UDP service milestone
+
+A separate C/Celix UDP service now forwards binary signed events into the
+**registered** typed caption stream service. Two independent native Celix
+processes use IPv6 loopback and refuse forged/replayed events. See
+[the binary UDP pilot](docs-bang-udp-pilot.md) and
+[three recorded local tests](evidence/bang-udp-celix-20261023.json).
+
+This is distinct from the earlier OpenThread POSIX CLI simulation. The
+native UDP service currently uses host-local loopback, not the actual
+OpenThread POSIX UDP network stack. Do not conflate these two tests.

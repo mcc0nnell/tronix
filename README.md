@@ -327,6 +327,23 @@ Linux host. Both use a disposable research runtime.
 
 See [6lowBang pilot](docs-bang-pilot.md) for source pinning, test limits,
 backpressure semantics, permission boundaries and the remaining Thread gate.
+## Native C/Celix 6lowBang binary UDP service (opt-in)
+
+Tronix now has an experimental **typed C/Celix UDP transport adapter**.
+Two separate native Celix processes can exchange raw binary, Ed25519-signed
+6lowBang events over **IPv6 loopback**, with subscriber fanout and signature
+verification performed by the registered C caption stream service. The
+original integer-returning Tronix job API never carries caption contents.
+Three disposable-host trials passed, including replay/forgery rejection
+and refusal to activate without the explicit fixture gate.
+
+This is **not yet the OpenThread native radio adapter**: that remains a
+separate integration gate. Build the optional tronix_bang_stream_bundle,
+tronix_bang_udp_bundle and bang-udp-celix-node targets, then run
+npm run test:bang:udp. See
+[the native binary UDP pilot](docs-bang-udp-pilot.md) and
+[the evidence record](evidence/bang-udp-celix-20261023.json).
+
 ## OpenThread × 6lowBang signed caption laboratory
 
 A new native C11 signed-event wire codec and two-node OpenThread POSIX UDP

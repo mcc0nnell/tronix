@@ -137,4 +137,15 @@ if(TRONIX_BANG_SOURCE)
     COMMAND $<TARGET_FILE:bang-thread-codec> selftest
     DEPENDS bang-thread-codec
     COMMENT "Check canonical wire boundaries before Thread simulator tests")
+  # Native C/Celix UDP transport, restricted to IPv6 loopback.
+  # Decode and pass the signed event to the typed stream service for validation.
+  add_celix_bundle(tronix_bang_udp
+    VERSION 0.1.0 SYMBOLIC_NAME org.tronix.bang.udp
+    NAME "Tronix experimental loopback C signed caption transport"
+    FILENAME tronix_bang_udp SOURCES src/bang_udp_adapter.c src/bang_wire.c)
+  target_include_directories(tronix_bang_udp PRIVATE include)
+  target_link_libraries(tronix_bang_udp PRIVATE Celix::framework lowbang)
+  add_executable(bang-udp-celix-node tests/bang-udp-celix-node.c)
+  target_include_directories(bang-udp-celix-node PRIVATE include)
+  target_link_libraries(bang-udp-celix-node PRIVATE Celix::framework lowbang)
 endif()
