@@ -82,3 +82,16 @@ add_celix_bundle(tronix_lightpanda_record
 target_include_directories(tronix_lightpanda_record PRIVATE include "${MSGPACK_SOURCE}/include")
 target_compile_definitions(tronix_lightpanda_record PRIVATE MSGPACK_NO_BOOST=1)
 target_link_libraries(tronix_lightpanda_record PRIVATE Celix::framework)
+
+# Optional bounded deterministic verifier; TRONIX v1 remains unchanged.
+add_celix_bundle(tronix_answer_verifier
+  VERSION 0.1.0 SYMBOLIC_NAME org.tronix.answer_verifier
+  NAME "TRONIX bounded deterministic answer verifier"
+  FILENAME tronix_answer_verifier SOURCES src/answer_verifier.c)
+target_include_directories(tronix_answer_verifier PRIVATE include)
+target_link_libraries(tronix_answer_verifier PRIVATE Celix::framework OpenSSL::Crypto)
+add_executable(tronix_verify_once src/verify_once.cc)
+target_include_directories(tronix_verify_once PRIVATE include)
+target_link_libraries(tronix_verify_once PRIVATE Celix::framework OpenSSL::Crypto)
+set_target_properties(tronix_verify_once PROPERTIES BUILD_RPATH
+  "${CMAKE_BINARY_DIR}/apache-celix/libs/framework;${CMAKE_BINARY_DIR}/apache-celix/libs/utils")

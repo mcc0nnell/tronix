@@ -48,13 +48,16 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release             -DCELIX_SOURCE="$RUNNER_TEMP/apache-celix"             -DMSGPACK_SOURCE="$RUNNER_TEMP/msgpack-c"
 
       - name: Build native runtime and fixture bundles
-        run: cmake --build build --target tronixd tronix_worker tronix_scheduler_bundle tronix_demo_bundle -j 3
+        run: cmake --build build --target tronixd tronix_worker tronix_scheduler_bundle tronix_demo_bundle tronix_answer_verifier_bundle tronix_verify_once -j 3
 
       - name: Install pinned MessagePack client
         run: npm ci --ignore-scripts
 
       - name: Run native-backed regression suite
         run: npm test
+
+      - name: Run native Celix answer-verifier integration checks
+        run: bash tests/answer-verifier.sh
 
       - name: Verify license metadata
         run: npm run license:check
