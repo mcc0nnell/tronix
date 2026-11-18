@@ -53,6 +53,9 @@ jobs:
       - name: Install pinned MessagePack client
         run: npm ci --ignore-scripts
 
+      - name: Run bounded batch admission and receipt unit checks
+        run: npm run test:verification:batch
+
       - name: Run native-backed regression suite
         run: npm test
 
