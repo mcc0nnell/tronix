@@ -33,6 +33,7 @@ struct WorkerOutcome {
     bool ok=false;
     bool timed_out=false;
     int64_t value=0;
+    std::string artifact_digest;
     std::vector<OperationPolicy> policies;
 };
 inline WorkerOutcome supervise(const std::string& binary,
@@ -193,8 +194,12 @@ inline WorkerOutcome supervise(const std::string& binary,
     try {
         auto handle=msgpack::unpack(data.data(),data.size());
         const auto& root=handle.get();
-        if(root.type!=msgpack::type::MAP || root.via.map.size!=3)return result;
-        bool seen_v=false,seen_ok=false,seen_value=false;
+        if(root.type!=msgpack::type::MAP ||
+           (root.via.map.size!=3 && root.via.map.size!=4))return result;
+        if((inspect && root.via.map.size!=3) ||
+           (!inspect && root.via.map.size==4 && operation.rfind("rizzer.harness.",0)!=0))
+            return WorkerOutcome{};
+        bool seen_v=false,seen_ok=false,seen_value=false,seen_digest=false;
         for(uint32_t i=0;i<root.via.map.size;i++){
             const auto& item=root.via.map.ptr[i];
             auto key=item.key.as<std::string>();
@@ -202,6 +207,8 @@ inline WorkerOutcome supervise(const std::string& binary,
             else if(key=="ok"&&!seen_ok){seen_ok=true;result.ok=item.val.as<bool>();}
             else if(key=="value"&&!seen_value&&!inspect){
                 seen_value=true;result.value=item.val.as<int64_t>();
+            }else if(key=="digest"&&!seen_digest&&!inspect){
+                seen_digest=true;result.artifact_digest=item.val.as<std::string>();
             }else if(key=="operations"&&!seen_value&&inspect){
                 seen_value=true;
                 if(item.val.type!=msgpack::type::ARRAY ||
@@ -230,6 +237,13 @@ inline WorkerOutcome supervise(const std::string& binary,
             }else return WorkerOutcome{};
         }
         if(!seen_v||!seen_ok||!seen_value||!result.ok)return WorkerOutcome{};
+        const bool harness=!inspect && operation.rfind("rizzer.harness.",0)==0;
+        if(harness){
+            if(!seen_digest||result.artifact_digest.size()!=64||
+               !std::all_of(result.artifact_digest.begin(),result.artifact_digest.end(),
+                   [](unsigned char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');}))
+                return WorkerOutcome{};
+        }else if(seen_digest)return WorkerOutcome{};
     } catch(...) {return WorkerOutcome{};}
     return result;
 }

@@ -1,5 +1,12 @@
 # TRONIX ↔ Rizzer corpus harness orchestration (experimental)
 
+> **Revision note, 2026-11-18:** This page documents the initial
+> single-operation v1 bridge. The stacked catalog/digest upgrade in
+> [harness-catalog-signed-receipts.md](harness-catalog-signed-receipts.md)
+> replaces the fixed `--casebook` argument with a pinned multi-cartridge
+> catalog and adds HMAC-protected v2 full-report SHA-256 receipts. The
+> limitations below describe the original v1 increment only.
+
 ## Delivered boundary
 
 This optional TRONIX v2 operation executes a **single operator-selected,

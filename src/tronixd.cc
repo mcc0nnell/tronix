@@ -85,6 +85,7 @@ void worker(Runtime* r){
             if(!r->ledger->emit(j.id,j.agent,j.operation,"running",j.dispatch_seq))
                 std::fprintf(stderr,"TRONIX_LEDGER_ERROR running %s\n",j.id);
             int64_t value=0;int ok=0;
+            std::string artifact_digest;
             const auto began=std::chrono::steady_clock::now();
             if(!r->worker_binary.empty()){
                 // The scheduler remains native Celix; execution occurs in a
@@ -93,6 +94,7 @@ void worker(Runtime* r){
                                                        j.operation,j.budget_ms,r->running,
                                                        false,j.lane,r->adapter_sha256);
                 ok=outcome.ok;value=outcome.value;
+                artifact_digest=outcome.artifact_digest;
             }else{
                 with_service<tronix_operation_service_t>(r->ctx,TRONIX_OPERATION_SERVICE,
                     [&](auto* s){ok=s->execute(s->handle,j.operation,&value);});
@@ -113,7 +115,8 @@ void worker(Runtime* r){
                                      terminal.state==TRONIX_DONE,terminal.value))
                     std::fprintf(stderr,"TRONIX_LEDGER_ERROR terminal %s\n",j.id);
                 if(r->evidence && !r->evidence->append(j.id,j.agent,j.operation,
-                       state,j.dispatch_seq,terminal.state==TRONIX_DONE,terminal.value)) {
+                       state,j.dispatch_seq,terminal.state==TRONIX_DONE,terminal.value,
+                       terminal.state==TRONIX_DONE?artifact_digest:std::string{})) {
                     std::fprintf(stderr,"TRONIX_EVIDENCE_ERROR terminal %s; refusing new work\n",j.id);
                     r->running.store(false,std::memory_order_release);
                 }
