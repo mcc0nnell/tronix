@@ -53,7 +53,8 @@ export async function verifyBatch(items,verify,{concurrency=4}={}){
   let total=0;
   const seen=new Set();
   const inputs=items.map((item)=>{
-    if(!item||typeof item!=='object'||!ID.test(item.candidateId)||
+    if(!item||typeof item!=='object'||typeof item.candidateId!=='string'||
+       typeof item.taskId!=='string'||!ID.test(item.candidateId)||
        !ID.test(item.taskId)||!(item.answer instanceof Uint8Array)||
        item.answer.byteLength>MAX_BYTES||seen.has(item.candidateId))
       throw Error('invalid, oversized or duplicate candidate');
