@@ -52,3 +52,26 @@ headers, Python Watcher authority and Rizzer shadow integration are unchanged.
 
 For now, no runtime calls fetch private code, no authority moves to NeonOxide,
 and no code is deleted from TRONIX.
+
+## Focused local ci-small
+
+Run bash scripts/ci_small_watchcore.sh for purely offline source-lock,
+license, and original C++20 checks. It builds only the small standalone
+Watchcore target in a disposable temporary directory.
+
+To additionally run the native Celix oracle and negative paths against an
+existing native build rooted in this exact checkout, set
+WATCHCORE_CELIX_BUILD=/absolute/path/to/tronix/build.
+The script refuses a missing or symlinked build and checks its CMake source
+root. It builds only relevant native targets and does not fetch dependencies.
+
+When an owner-authorized checkout of the actual Atlas Watcher Python code is
+present, also set WATCHCORE_RIZZER_ROOT=/absolute/path/to/rizzer.
+This additionally runs 1,200 seeded real Python/Celix decision comparisons:
+240 security, 260 ledger, 240 cooldown, 300 agent picks, and 160 role
+readiness. Only provider and filesystem source acquisition are normalized;
+the Python decision functions themselves are not mocked.
+
+Without the optional roots, the script explicitly reports the relevant
+comparisons as NOT RUN. The historical 1,690-case suite is separate and
+is not claimed to have been reproduced by these 1,200 cases.
