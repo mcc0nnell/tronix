@@ -3,6 +3,7 @@
 // TRONIX opt-in one-shot Celix operation worker.
 // This is fault and timeout containment, NOT a security sandbox.
 #include "tronix_service.h"
+#include "tronix_artifact_service.h"
 #include "archive_identity.hpp"
 #include <celix_bundle_context.h>
 #include <celix_constants.h>
@@ -18,6 +19,7 @@
 #include <filesystem>
 #include <functional>
 #include <vector>
+#include <algorithm>
 #include <set>
 #include <string>
 #include <signal.h>
@@ -32,13 +34,16 @@ void limit(int resource,rlim_t amount){
     const rlimit lim{amount,amount};
     if(setrlimit(resource,&lim)!=0){std::perror("setrlimit");std::_Exit(72);}
 }
-void send_result(bool ok,int64_t value){
+void send_result(bool ok,int64_t value,const std::string& digest){
     msgpack::sbuffer out;
     msgpack::packer<msgpack::sbuffer> pk(out);
-    pk.pack_map(3);
+    pk.pack_map(digest.empty()?3:4);
     pk.pack(std::string("v"));pk.pack(1);
     pk.pack(std::string("ok"));pk.pack(ok);
     pk.pack(std::string("value"));pk.pack(value);
+    if(!digest.empty()){
+        pk.pack(std::string("digest"));pk.pack(digest);
+    }
     if(out.size()>256)std::_Exit(73);
     size_t pos=0;
     while(pos<out.size()){
@@ -197,12 +202,37 @@ int main(int argc,char** argv) {
             static_cast<tronix_operation_service_t*>(svc));
     };
     bool found=celix_bundleContext_useServiceWithOptions(ctx,&opts);
+    std::string artifact_digest;
+    if(execute && found && ok && op.rfind("rizzer.harness.",0)==0) {
+        char digest[65]{};
+        bool obtained=false;
+        celix_service_use_options_t dig_opts{};
+        dig_opts.filter.serviceName=TRONIX_ARTIFACT_SERVICE;
+        dig_opts.filter.versionRange="[1.0.0,2.0.0)";
+        struct DigestRequest{char* out;bool ok;};
+        DigestRequest req{digest,false};
+        dig_opts.callbackHandle=&req;
+        dig_opts.use=[](void* h,void* svc){
+            auto* request=static_cast<DigestRequest*>(h);
+            auto* service=static_cast<tronix_artifact_service_t*>(svc);
+            if(service&&service->take_digest)
+                request->ok=service->take_digest(service->handle,request->out)==1;
+        };
+        obtained=celix_bundleContext_useServiceWithOptions(ctx,&dig_opts)&&req.ok;
+        if(obtained){
+            artifact_digest=digest;
+            obtained=artifact_digest.size()==64 &&
+                std::all_of(artifact_digest.begin(),artifact_digest.end(),
+                    [](unsigned char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');});
+        }
+        if(!obtained){ok=0;value=0;artifact_digest.clear();}
+    }
     // Destruct the in-process Celix framework before signaling completion,
     // so an operation that hangs during cleanup can also be contained.
     celix_frameworkFactory_destroyFramework(framework);
     if(inspect){
         if(!found||!described)return 7;
         send_policy(policies);
-    }else send_result(found && ok,value);
+    }else send_result(found && ok,value,artifact_digest);
     return 0;
 }

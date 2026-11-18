@@ -13,7 +13,7 @@ import {encode,decode} from '@msgpack/msgpack';
 const SHA=/^[0-9a-f]{64}$/;
 const OPTIONS=new Set([
   '--socket','--token-file','--rizzer-cli','--rizzer-cli-sha256',
-  '--casebook','--host','--host-sha256','--bundle',
+  '--catalog','--catalog-sha256','--host','--host-sha256','--bundle',
   '--bundle-sha256','--evidence-dir'
 ]);
 function argsFrom(argv) {
@@ -26,7 +26,7 @@ function argsFrom(argv) {
   for(const key of OPTIONS)if(!options.has(key))throw Error('missing option '+key);
   for(const key of OPTIONS)if(!key.includes('sha256')&&!isAbsolute(options.get(key)))
     throw Error('absolute paths required');
-  for(const key of ['--rizzer-cli-sha256','--host-sha256','--bundle-sha256'])
+  for(const key of ['--rizzer-cli-sha256','--host-sha256','--bundle-sha256','--catalog-sha256'])
     if(!SHA.test(options.get(key)))throw Error('invalid artifact SHA pin');
   return options;
 }
@@ -55,8 +55,9 @@ function strictObject(obj,keys){
      Object.keys(obj).length!==keys.length ||
      keys.some(k=>!Object.hasOwn(obj,k)))throw Error('unexpected MsgPack request');
 }
-const reply=(ok,value)=>{
-  const body=Buffer.from(encode({ok,value:ok?value:0}));
+const reply=(ok,value,digest)=>{
+  const payload=ok?{ok:true,value,digest}:{ok:false,value:0};
+  const body=Buffer.from(encode(payload));
   const frame=Buffer.allocUnsafe(4+body.length);
   frame.writeUInt32BE(body.length,0);
   body.copy(frame,4);
@@ -79,13 +80,43 @@ async function verifyConfig(o) {
     const bytes=await regular(o.get(pathArg),4*1024*1024);
     if(hash(bytes)!==o.get(shaArg))throw Error('operator artifact pin mismatch '+pathArg);
   }
-  await privateDir(o.get('--casebook'));
-  // The Rizzer bridge verifies source hashes, runtime and oracle pins itself.
-  for(const f of ['manifest.json','ir.json','build-receipt.json'])
-    await regular(join(o.get('--casebook'),f),262144);
+  const catalogPath=o.get('--catalog');
+  if(catalogPath!==join(bridgeRoot,'catalog.json'))
+    throw Error('catalog path must be fixed, owner-private worker path');
+  const pin=(await regular(join(bridgeRoot,'catalog.sha256'),64,{privateFile:true})).toString();
+  const raw=await regular(catalogPath,8192,{privateFile:true});
+  if(!SHA.test(pin)||pin!==o.get('--catalog-sha256')||hash(raw)!==pin)
+    throw Error('catalog source digest mismatch');
+  const doc=JSON.parse(raw);
+  strictObject(doc,['schema','entries']);
+  if(doc.schema!=='tronix.rizzer.catalog.v1'||!Array.isArray(doc.entries)||
+     doc.entries.length<1||doc.entries.length>8)throw Error('invalid catalog version/count');
+  const entries=new Map();
+  const families=new Set(['mcp-authorization','sixlowpan-fragments',
+                          'spinel-packed-uint','evm-fullmath']);
+  for(const item of doc.entries){
+    strictObject(item,['operation','family','casebook','ir_sha256']);
+    if(typeof item.operation!=='string'||
+       !/^rizzer\.harness\.[a-z0-9_-]{1,33}$/.test(item.operation)||
+       item.operation.length>48||entries.has(item.operation)||
+       !families.has(item.family)||!isAbsolute(item.casebook)||
+       typeof item.ir_sha256!=='string'||!SHA.test(item.ir_sha256))
+      throw Error('invalid or duplicate catalog cartridge');
+    await privateDir(item.casebook);
+    for(const name of ['manifest.json','ir.json','build-receipt.json'])
+      await regular(join(item.casebook,name),262144);
+    const irRaw=await regular(join(item.casebook,'ir.json'),262144);
+    if(hash(irRaw)!==item.ir_sha256)
+      throw Error('catalog IR source pin differs');
+    const ir=JSON.parse(irRaw);
+    if(ir.schema!=='rizzer.harness-ir.v1'||ir.family!==item.family||
+       ir.execution!=='offline_reference_only')
+      throw Error('catalog IR authority/family mismatch');
+    entries.set(item.operation,item);
+  }
   const cli=o.get('--rizzer-cli');
   if(!cli.endsWith('/rizzer_cli.py'))throw Error('expected reviewed Rizzer CLI path');
-  return {socket,evidence,key,cli,casebook:o.get('--casebook'),
+  return {socket,evidence,key,cli,catalog:entries,catalogSha:pin,
           host:o.get('--host'),hostSha:o.get('--host-sha256'),
           bundle:o.get('--bundle'),bundleSha:o.get('--bundle-sha256')};
 }
@@ -106,10 +137,10 @@ async function inspectReceipt(directory) {
   return {count:report.parity_matches,receipt_sha256:hash(receiptRaw),
           report_sha256:hash(reportRaw),ir_sha256:report.ir_sha256};
 }
-async function spawnRizzer(config,out) {
+async function spawnRizzer(config,entry,out) {
   const command='/usr/bin/python3';
   const argv=['-B',config.cli,'scan','harness-native',
-              '--casebook',config.casebook,
+              '--casebook',entry.casebook,
               '--host',config.host,'--host-sha256',config.hostSha,
               '--celix-bundle',config.bundle,
               '--celix-bundle-sha256',config.bundleSha,
@@ -152,18 +183,23 @@ async function main() {
         strictObject(body,['v','op','token']);
         const received=Buffer.from(String(body.token));
         const expected=Buffer.from(c.key);
-        if(body.v!==1||body.op!=='rizzer.harness.reference'||
+        if(body.v!==1||typeof body.op!=='string'||
            received.length!==expected.length||
-           !timingSafeEqual(received,expected)||active||attempts>=8)
+           !timingSafeEqual(received,expected)||!c.catalog.has(body.op)||
+           active||attempts>=8)
           throw Error('unauthorized/busy request');
         active=true;
         attempts++;
         const name='run-'+String(attempts).padStart(4,'0');
         const folder=join(c.evidence,name);
         try{
-          await spawnRizzer(c,folder);
+          const selected=c.catalog.get(body.op);
+          await spawnRizzer(c,selected,folder);
           const obs=await inspectReceipt(folder);
-          const audit={schema:'tronix.rizzer.sidecar.v1',run:name,offline_only:true,
+          const report=JSON.parse(await regular(join(folder,'native-parity.json'),65536));
+          if(report.family!==selected.family)throw Error('wrong corpus family produced');
+          const audit={schema:'tronix.rizzer.sidecar.v2',run:name,
+                       operation:body.op,catalog_sha256:c.catalogSha,offline_only:true,
                        target_executed:false,receipt:obs,
                        cli_sha256:hash(await regular(c.cli,4*1024*1024)),
                        bundle_sha256:c.bundleSha,host_sha256:c.hostSha};
@@ -171,9 +207,13 @@ async function main() {
           const fd=await open(auditPath,'wx',0o600);
           try{await fd.writeFile(JSON.stringify(audit)+'\n');await fd.sync()}
           finally{await fd.close()}
-          socket.end(reply(true,obs.count));
+          socket.end(reply(true,obs.count,obs.report_sha256));
         }finally{active=false}
-      }catch(_){active=false;socket.end(reply(false,0));}
+      }catch(err){
+        active=false;
+        console.error('RIZZER_HARNESS_BRIDGE_REQUEST_REFUSED:',err.message);
+        socket.end(reply(false,0));
+      }
     });
   });
   await new Promise((ok,fail)=>{server.once('error',fail);server.listen(c.socket,ok)});

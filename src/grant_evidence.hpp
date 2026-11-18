@@ -4,6 +4,7 @@
 #pragma once
 #include <openssl/hmac.h>
 #include <atomic>
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <string>
@@ -71,12 +72,23 @@ public:
     ~GrantEvidence(){if(fd_>=0)close(fd_);}
     bool healthy()const{return healthy_;}
     bool append(const std::string& id,const std::string& agent,const std::string& op,
-                const std::string& state,uint64_t dispatch,bool has_value,int64_t value) {
+                const std::string& state,uint64_t dispatch,bool has_value,int64_t value,
+                const std::string& evidence_sha256="") {
         if(!healthy_)return false;
         const auto seq=seq_+1;
-        std::string data="v1 "+std::to_string(seq)+" "+hex(id)+" "+hex(agent)+" "+
+        if(!evidence_sha256.empty() &&
+           (evidence_sha256.size()!=64 || !has_value ||
+            !std::all_of(evidence_sha256.begin(),evidence_sha256.end(),
+                [](unsigned char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');}))) {
+            healthy_=false;
+            return false;
+        }
+        std::string data=(evidence_sha256.empty()?"v1 ":"v2 ")+
+           std::to_string(seq)+" "+hex(id)+" "+hex(agent)+" "+
            hex(op)+" "+state+" "+std::to_string(dispatch)+" "+
-           (has_value?std::to_string(value):"-")+" "+artifact_+" "+grant_+" "+prev_;
+           (has_value?std::to_string(value):"-")+" "+
+           (evidence_sha256.empty()?"":evidence_sha256+" ")+
+           artifact_+" "+grant_+" "+prev_;
         unsigned char result[EVP_MAX_MD_SIZE]{};
         unsigned int n=0;
         if(!HMAC(EVP_sha256(),key_.data(),static_cast<int>(key_.size()),

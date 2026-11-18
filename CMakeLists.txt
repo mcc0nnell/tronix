@@ -82,7 +82,7 @@ add_celix_bundle(tronix_rizzer_harness
   FILENAME tronix_rizzer_harness SOURCES src/rizzer_harness_adapter.cc)
 target_include_directories(tronix_rizzer_harness PRIVATE include "${MSGPACK_SOURCE}/include")
 target_compile_definitions(tronix_rizzer_harness PRIVATE MSGPACK_NO_BOOST=1)
-target_link_libraries(tronix_rizzer_harness PRIVATE Celix::framework)
+target_link_libraries(tronix_rizzer_harness PRIVATE Celix::framework OpenSSL::Crypto "${JANSSON_LIBRARY}")
 
 # Optional restricted Lightpanda Agent Bridge record/replay Celix bundle.
 # Use instead of tronix_cdp; the two adapters are mutually exclusive per runtime.

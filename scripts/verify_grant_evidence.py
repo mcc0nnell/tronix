@@ -64,6 +64,7 @@ def verify(key, raw_grants, archive, raw_evidence, checkpoint_sequences=frozense
     prev = "0" * 64
     count = 0
     checkpoint_heads = {}
+    artifact_references = []
     for line_number, line in enumerate(raw_evidence.splitlines(keepends=True), 1):
         if not line.endswith(b"\n"):
             fail(f"evidence line {line_number}: truncated final record")
@@ -71,10 +72,19 @@ def verify(key, raw_grants, archive, raw_evidence, checkpoint_sequences=frozense
             parts = line[:-1].decode("ascii").split(" ")
         except UnicodeError:
             fail(f"evidence line {line_number}: invalid encoding")
-        if len(parts) != 12 or any(not p for p in parts):
-            fail(f"evidence line {line_number}: invalid field count")
-        v, seq, job_id, agent, op, state, dispatch, value, artifact, grant, prior, mac = parts
-        if v != "v1" or seq != str(line_number) or            (not dispatch.isdigit()) or dispatch.startswith("0") and dispatch != "0":
+        if any(not p for p in parts):
+            fail(f"evidence line {line_number}: empty field")
+        if len(parts) == 12 and parts[0] == "v1":
+            v, seq, job_id, agent, op, state, dispatch, value, artifact, grant, prior, mac = parts
+            artifact_digest = None
+        elif len(parts) == 13 and parts[0] == "v2":
+            (v, seq, job_id, agent, op, state, dispatch, value,
+             artifact_digest, artifact, grant, prior, mac) = parts
+            if state != "completed" or not re.fullmatch(r"[0-9a-f]{64}", artifact_digest):
+                fail(f"evidence line {line_number}: invalid attached evidence digest")
+        else:
+            fail(f"evidence line {line_number}: invalid record version/field count")
+        if seq != str(line_number) or            (not dispatch.isdigit()) or dispatch.startswith("0") and dispatch != "0":
             fail(f"evidence line {line_number}: sequence or dispatch invalid")
         if artifact != fields["artifact"] or grant != grant_hash or prior != prev:
             fail(f"evidence line {line_number}: grant/chain identity differs")
@@ -101,13 +111,18 @@ def verify(key, raw_grants, archive, raw_evidence, checkpoint_sequences=frozense
                             hashlib.sha256).hexdigest()
         if not hmac.compare_digest(mac, expected):
             fail(f"evidence line {line_number}: HMAC mismatch")
+        if artifact_digest is not None:
+            artifact_references.append({"sequence": line_number,
+                                        "id": decodehex(job_id),
+                                        "operation": decodehex(op),
+                                        "reportSha256": artifact_digest})
         prev = mac
         count += 1
         if count in checkpoint_sequences:
             checkpoint_heads[count] = mac
     if count == 0:
         fail("no terminal receipts present")
-    return count, prev, grant_hash, fields["artifact"], checkpoint_heads
+    return count, prev, grant_hash, fields["artifact"], checkpoint_heads, artifact_references
 
 
 def main():
@@ -116,6 +131,7 @@ def main():
     parser.add_argument("--grants", required=True)
     parser.add_argument("--adapter", required=True)
     parser.add_argument("--evidence", required=True)
+    parser.add_argument("--artifact-dir", help="Optional private Rizzer evidence directory to verify against signed v2 digests")
     checkpoints = parser.add_mutually_exclusive_group()
     checkpoints.add_argument("--checkpoint", action="append", default=[],
                              help="One or more separately retained operator checkpoints")
@@ -140,9 +156,25 @@ def main():
         for path in args.checkpoint:
             checkpoints.append(verify_checkpoint(read_checkpoint_file(path), operator_key))
         sequences = {c["sequence"] for c in checkpoints}
-        count, head, grant, artifact, heads = verify(
+        count, head, grant, artifact, heads, references = verify(
             key, Path(args.grants).read_bytes(), Path(args.adapter).read_bytes(),
             Path(args.evidence).read_bytes(), sequences)
+        if args.artifact_dir:
+            if not references:
+                fail("no HMAC-signed v2 artifact digests to verify")
+            root = Path(args.artifact_dir)
+            if not root.is_dir() or root.is_symlink():
+                fail("invalid artifact evidence root")
+            files = sorted(root.glob("run-*/native-parity.json"))
+            if len(files) > 8 or len(files) != len(references):
+                fail("artifact evidence count differs from signed digest count")
+            observed = []
+            for file in files:
+                if file.is_symlink() or file.parent.is_symlink() or file.stat().st_size > 65536:
+                    fail("untrusted native parity report file")
+                observed.append(hashlib.sha256(file.read_bytes()).hexdigest())
+            if sorted(observed) != sorted(ref["reportSha256"] for ref in references):
+                fail("artifact bytes differ from HMAC-signed v2 report digest")
         for checkpoint in checkpoints:
             position = checkpoint["sequence"]
             if position > count:
@@ -157,6 +189,8 @@ def main():
         print(json.dumps({"schema": "tronix.grant-evidence.v1", "verified": count,
                           "chainHead": head, "grantSha256": grant,
                           "artifactSha256": artifact,
+                          "artifactReferences": references,
+                          "artifactFilesVerified": bool(args.artifact_dir),
                           "checkpointMode": ("created" if args.write_checkpoint else
                                              "verified" if checkpoints else "none"),
                           "anchoredPrefix": max(sequences, default=0),
