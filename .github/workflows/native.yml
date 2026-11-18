@@ -75,5 +75,14 @@ jobs:
             "$(realpath build/tronix_watchcore_security.zip)" \
             "$(realpath build/tronix_demo.zip)"
 
+      - name: Verify genuine Celix ledger eligibility and fail-closed boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/watchcore_celix_ledger.py \
+            "$(realpath build/tronix_watchcore_shadow)" \
+            "$(realpath build/tronix_watchcore_security.zip)" \
+            "$(realpath build/tronix_demo.zip)"
+
       - name: Verify license metadata
         run: npm run license:check
