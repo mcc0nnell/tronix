@@ -73,6 +73,17 @@ target_compile_definitions(tronix_thread PRIVATE MSGPACK_NO_BOOST=1)
 target_link_libraries(tronix_thread PRIVATE Celix::framework)
 
 
+# Optional, capability-gated Rizzer offline harness operation adapter.
+# Reuses TRONIX's v2 scheduler, one-shot worker, frozen bundle grants and
+# HMAC evidence chain.  Native harness evaluation stays out of the worker.
+add_celix_bundle(tronix_rizzer_harness
+  VERSION 0.1.0 SYMBOLIC_NAME org.tronix.adapter.rizzer_harness
+  NAME "TRONIX fixed-scope Rizzer harness bridge"
+  FILENAME tronix_rizzer_harness SOURCES src/rizzer_harness_adapter.cc)
+target_include_directories(tronix_rizzer_harness PRIVATE include "${MSGPACK_SOURCE}/include")
+target_compile_definitions(tronix_rizzer_harness PRIVATE MSGPACK_NO_BOOST=1)
+target_link_libraries(tronix_rizzer_harness PRIVATE Celix::framework)
+
 # Optional restricted Lightpanda Agent Bridge record/replay Celix bundle.
 # Use instead of tronix_cdp; the two adapters are mutually exclusive per runtime.
 add_celix_bundle(tronix_lightpanda_record
