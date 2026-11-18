@@ -65,5 +65,8 @@ jobs:
       - name: Run persistent typed Celix verification and review-gate checks
         run: npm run test:verification
 
+      - name: Run bounded native connection worker pool tests
+        run: npm run test:verification:pool
+
       - name: Verify license metadata
         run: npm run license:check

@@ -100,6 +100,6 @@ set_target_properties(tronix_verify_once PROPERTIES BUILD_RPATH
 add_executable(tronix_verify_daemon src/verify_daemon.cc)
 target_include_directories(tronix_verify_daemon PRIVATE include "${MSGPACK_SOURCE}/include")
 target_compile_definitions(tronix_verify_daemon PRIVATE MSGPACK_NO_BOOST=1)
-target_link_libraries(tronix_verify_daemon PRIVATE Celix::framework OpenSSL::Crypto)
+target_link_libraries(tronix_verify_daemon PRIVATE Celix::framework OpenSSL::Crypto pthread)
 set_target_properties(tronix_verify_daemon PROPERTIES BUILD_RPATH
   "${CMAKE_BINARY_DIR}/apache-celix/libs/framework;${CMAKE_BINARY_DIR}/apache-celix/libs/utils")

@@ -11,6 +11,8 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -18,9 +20,11 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #include <fcntl.h>
 #include <poll.h>
@@ -119,24 +123,45 @@ std::map<std::string,std::string> read_oracles(const std::vector<uint8_t>& bytes
   return out;
 }
 std::map<std::string,std::string> arguments(int n,char** v){
-  if(n!=9)throw Error("expected --socket --oracle --bundle --bundle-sha256");
+  if(n!=9&&n!=11)throw Error("expected --socket --oracle --bundle --bundle-sha256 [--workers N]");
   std::map<std::string,std::string> a;
   for(int i=1;i<n;i+=2){
     std::string k=v[i];
-    if(k!="--socket"&&k!="--oracle"&&k!="--bundle"&&k!="--bundle-sha256")
+    if(k!="--socket"&&k!="--oracle"&&k!="--bundle"&&k!="--bundle-sha256"&&k!="--workers")
       throw Error("unexpected argument");
     if(!a.emplace(k,v[i+1]).second)throw Error("duplicate argument");
   }
-  if(a.size()!=4||!valid_sha(a.at("--bundle-sha256")))throw Error("bad bundle pin");
+  if(a.size()!=static_cast<size_t>((n-1)/2)||!valid_sha(a.at("--bundle-sha256")))
+    throw Error("bad bundle pin");
+  if(a.count("--workers")&&
+     (a.at("--workers").size()!=1||a.at("--workers")[0]<'1'||
+      a.at("--workers")[0]>'8'))throw Error("workers must be 1..8");
   return a;
 }
-bool exact(int fd,void* buf,size_t n,bool send_mode){
+// One absolute deadline for framing, payload, and reply. A same-UID local
+// peer cannot monopolize a worker indefinitely by dripping bytes under a
+// per-recv socket timeout. Nonblocking I/O prevents poll/recv races.
+using Clock=std::chrono::steady_clock;
+bool exact(int fd,void* buf,size_t n,bool send_mode,Clock::time_point deadline){
   char* p=static_cast<char*>(buf);
   while(n){
-    ssize_t k=send_mode?send(fd,p,n,MSG_NOSIGNAL):recv(fd,p,n,0);
-    if(k<0&&errno==EINTR)continue;
-    if(k<=0)return false;p+=k;n-=k;
-  }return true;
+    const auto now=Clock::now();
+    if(now>=deadline)return false;
+    const auto remaining=std::chrono::duration_cast<std::chrono::milliseconds>(
+      deadline-now).count();
+    pollfd event{fd,static_cast<short>(send_mode?POLLOUT:POLLIN),0};
+    const int timeout=remaining>0?static_cast<int>(remaining)+1:1;
+    int ready=poll(&event,1,timeout);
+    if(ready<0&&errno==EINTR)continue;
+    if(ready<=0||(event.revents&(POLLERR|POLLHUP|POLLNVAL)))return false;
+    if(!(event.revents&event.events))continue;
+    ssize_t k=send_mode?send(fd,p,n,MSG_NOSIGNAL|MSG_DONTWAIT):
+                        recv(fd,p,n,MSG_DONTWAIT);
+    if(k<0&&(errno==EINTR||errno==EAGAIN||errno==EWOULDBLOCK))continue;
+    if(k<=0)return false;
+    p+=k;n-=static_cast<size_t>(k);
+  }
+  return true;
 }
 struct Query{std::string action,task;std::vector<uint8_t> answer;};
 Query parse(const std::vector<char>& bytes){
@@ -188,11 +213,13 @@ struct State{
   celix_bundle_context_t* ctx;
   std::map<std::string,std::string> expected;
   std::string manifest_hash;
+  std::mutex count_mutex;
   uint64_t count=0,ok=0,rejected=0,uncertain=0,execution_ns=0;
 };
 std::string reply(State& state,const Query& q){
   msgpack::sbuffer buffer;P pk(buffer);
   if(q.action=="stats"){
+    std::lock_guard<std::mutex> lk(state.count_mutex);
     pk.pack_map(9);
     key(pk,"v");pk.pack(2);key(pk,"ok");pk.pack(true);
     key(pk,"protocol");pk.pack(std::string("tronix.typed-verification/v2"));
@@ -221,10 +248,13 @@ std::string reply(State& state,const Query& q){
     }
     const auto elapsed=static_cast<uint64_t>(std::chrono::duration_cast<
       std::chrono::nanoseconds>(std::chrono::steady_clock::now()-start).count());
-    state.count++;state.execution_ns+=elapsed;
-    if(status==TRONIX_ANSWER_VERIFIED)state.ok++;
-    else if(status==TRONIX_ANSWER_REJECTED)state.rejected++;
-    else state.uncertain++;
+    {
+      std::lock_guard<std::mutex> lk(state.count_mutex);
+      state.count++;state.execution_ns+=elapsed;
+      if(status==TRONIX_ANSWER_VERIFIED)state.ok++;
+      else if(status==TRONIX_ANSWER_REJECTED)state.rejected++;
+      else state.uncertain++;
+    }
     const std::string decision=status==TRONIX_ANSWER_VERIFIED?"VERIFIED":
                                status==TRONIX_ANSWER_REJECTED?"REJECTED":"UNVERIFIABLE";
     pk.pack_map(15);
@@ -252,29 +282,84 @@ std::string invalid(){
   key(pk,"executionAuthorized");pk.pack(false);
   return std::string(b.data(),b.size());
 }
-void client(int fd,State& state){
-  timeval tv{2,0};
-  setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
-  setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
+void client(int fd,State& state,Clock::time_point deadline){
   struct ucred peer{};socklen_t len=sizeof(peer);
   if(getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&peer,&len)!=0||peer.uid!=getuid())return;
   uint32_t be=0;
-  if(!exact(fd,&be,4,false))return;
+  if(!exact(fd,&be,4,false,deadline))return;
   uint32_t n=ntohl(be);
   if(n==0||n>TRONIX_ANSWER_MAX_BYTES+1024u)return;
   std::vector<char> data(n);
-  if(!exact(fd,data.data(),data.size(),false))return;
+  if(!exact(fd,data.data(),data.size(),false,deadline))return;
   std::string result;
   try{result=reply(state,parse(data));}catch(const std::exception&){result=invalid();}
   if(result.size()>2048)return;
   be=htonl(static_cast<uint32_t>(result.size()));
-  if(exact(fd,&be,4,true))exact(fd,result.data(),result.size(),true);
+  if(exact(fd,&be,4,true,deadline))exact(fd,result.data(),result.size(),true,deadline);
 }
+// Fixed worker count and a bounded 32-connection backlog in user space.
+// Each accepted descriptor has exactly one owner. No unbounded detached threads.
+// The Celix service is immutable and the SHA implementation is per-call; only
+// counters are shared mutable state, protected by State::count_mutex.
+struct ClientPool {
+  static constexpr size_t MAX_PENDING=32;
+  State& state;
+  std::mutex mutex;
+  std::condition_variable ready;
+  struct Pending {int fd;Clock::time_point deadline;};
+  std::deque<Pending> pending;
+  std::vector<std::thread> workers;
+  bool closing=false;
+
+  ClientPool(State& state,unsigned count):state(state){
+    try{
+      for(unsigned i=0;i<count;++i)workers.emplace_back([this]{run();});
+    }catch(...){shutdown();throw;}
+  }
+  ClientPool(const ClientPool&)=delete;
+  ClientPool& operator=(const ClientPool&)=delete;
+  void run(){
+    for(;;){
+      Pending job{-1,Clock::time_point{}};
+      {
+        std::unique_lock<std::mutex> lk(mutex);
+        ready.wait(lk,[this]{return closing||!pending.empty();});
+        if(closing)return;
+        job=pending.front();pending.pop_front();
+      }
+      try{
+        if(Clock::now()<job.deadline)client(job.fd,state,job.deadline);
+      }catch(...){/* Close; never fabricate a receipt. */}
+      close(job.fd);
+    }
+  }
+  void submit(int fd){
+    {
+      std::lock_guard<std::mutex> lk(mutex);
+      if(closing||pending.size()>=MAX_PENDING){close(fd);return;}
+      pending.push_back({fd,Clock::now()+std::chrono::seconds(2)});
+    }
+    ready.notify_one();
+  }
+  void shutdown(){
+    {
+      std::lock_guard<std::mutex> lk(mutex);
+      closing=true;
+      for(const auto& job:pending)close(job.fd);
+      pending.clear();
+    }
+    ready.notify_all();
+    for(auto& worker:workers)if(worker.joinable())worker.join();
+  }
+  ~ClientPool(){shutdown();}
+};
 } // namespace
 
 int main(int argc,char** argv){
   try{
     auto a=arguments(argc,argv);
+    const unsigned worker_count=a.count("--workers")?
+      static_cast<unsigned>(a.at("--workers")[0]-'0'):1;
     const auto manifest=read_regular(a.at("--oracle"),8192,true);
     auto oracles=read_oracles(manifest);
     const std::string manifest_hash=hex(sha(manifest.data(),manifest.size()));
@@ -351,6 +436,7 @@ int main(int argc,char** argv){
     if(chmod(socket.c_str(),0600)!=0||listen(listener,32)!=0)
       throw Error("listen failed");
     State state{ctx,std::move(oracles),manifest_hash};
+    ClientPool pool{state,worker_count};
     std::signal(SIGINT,signal_stop);std::signal(SIGTERM,signal_stop);
     std::printf("TRONIX_VERIFY_READY %s\n",socket.c_str());std::fflush(stdout);
     while(!stop.load()){
@@ -360,7 +446,7 @@ int main(int argc,char** argv){
       if(!(pfd.revents&POLLIN))continue;
       int c=accept4(listener,nullptr,nullptr,SOCK_CLOEXEC);
       if(c<0){if(errno==EINTR)continue;break;}
-      client(c,state);close(c);
+      pool.submit(c);
     }
     return 0;
   }catch(const std::exception& e){
