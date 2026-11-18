@@ -2,10 +2,15 @@
 // Genuine Celix bundle: Watchcore decision service has no I/O or posting authority.
 #include "tronix_watchcore_security.h"
 #include "tronix_watchcore_ledger.h"
+#include "tronix_watchcore_routing.h"
 #include "watchcore/watchcore.hpp"
 #include <celix_bundle_activator.h>
 #include <celix_bundle_context.h>
 #include <exception>
+#include <cmath>
+#include <limits>
+#include <map>
+#include <set>
 #include <cstring>
 #include <cstdint>
 #include <string>
@@ -17,6 +22,10 @@ struct State {
     tronix_watchcore_security_service_t service{};
     long ledger_service_id{-1};
     tronix_watchcore_ledger_service_t ledger_service{};
+    long cooldown_service_id{-1};
+    tronix_watchcore_cooldown_service_t cooldown_service{};
+    long routing_service_id{-1};
+    tronix_watchcore_routing_service_t routing_service{};
 };
 bool risk_ok(int n) { return n >= 0 && n <= 3; }
 bool bit_ok(int n) { return n == 0 || n == 1; }
@@ -108,6 +117,152 @@ int decide_ledger(void*, const tronix_watchcore_ledger_request_t* req,
         return -1;
     }
 }
+
+bool label_ok(const char* value) {
+    if (!value) return false;
+    const size_t n=strnlen(value,TRONIX_WATCHCORE_MAX_LABEL+1);
+    if(n==0 || n>TRONIX_WATCHCORE_MAX_LABEL) return false;
+    for(size_t i=0;i<n;++i) {
+        const auto ch=static_cast<unsigned char>(value[i]);
+        if (ch<33 || ch>126) return false;
+    }
+    return true;
+}
+bool finite(double value) { return std::isfinite(value); }
+bool states_ok(const tronix_watchcore_cooldown_state_t* data,size_t count) {
+    if (count>TRONIX_WATCHCORE_MAX_STATES || (count && !data)) return false;
+    std::set<std::string> seen;
+    for(size_t i=0;i<count;++i) {
+        const auto& state=data[i];
+        if(!label_ok(state.vendor) || !finite(state.until_utc_seconds) ||
+           !finite(state.set_at_utc_seconds) ||
+           !seen.insert(state.vendor).second) return false;
+    }
+    return true;
+}
+watchcore::Cooldowns convert_states(const tronix_watchcore_cooldown_state_t* states,
+                                    size_t count) {
+    watchcore::Cooldowns converted;
+    for(size_t i=0;i<count;++i) {
+        const auto& state=states[i];
+        converted.emplace(state.vendor,watchcore::CooldownState{
+            state.until_utc_seconds,state.set_at_utc_seconds,state.consecutive,
+            "normalized"
+        });
+    }
+    return converted;
+}
+int decide_cooldown(void*,const tronix_watchcore_cooldown_request_t* in,
+                    tronix_watchcore_cooldown_result_t* out) noexcept {
+    if(!in || !out || in->operation<0 || in->operation>1 ||
+       !label_ok(in->vendor) || !finite(in->now_utc_seconds) ||
+       !states_ok(in->states,in->state_count) ||
+       !bit_ok(in->has_reset) || !bit_ok(in->strong_reset) ||
+       !finite(in->reset_utc_seconds) || in->base_seconds<0 ||
+       in->max_seconds<0 || in->strong_reset_max_seconds<0) return -1;
+    try {
+        const auto states=convert_states(in->states,in->state_count);
+        std::optional<watchcore::CooldownState> state;
+        if(in->operation==0) {
+            state=watchcore::active_cooldown(states,in->vendor,in->now_utc_seconds);
+        } else {
+            state=watchcore::record_cooldown(
+                states,in->vendor,
+                watchcore::LimitInfo{"normalized",
+                    in->has_reset ? std::optional<double>{in->reset_utc_seconds}
+                                  : std::nullopt,
+                    in->strong_reset!=0},
+                in->now_utc_seconds,
+                watchcore::CooldownPolicy{
+                    in->base_seconds,in->max_seconds,in->strong_reset_max_seconds
+                });
+        }
+        *out={state.has_value()?1:0,0,0,0};
+        if (state) {
+            if(!finite(state->until_utc_seconds) || !finite(state->set_at_utc_seconds))
+                return -1;
+            out->until_utc_seconds=state->until_utc_seconds;
+            out->set_at_utc_seconds=state->set_at_utc_seconds;
+            out->consecutive=state->consecutive;
+        }
+        return 0;
+    } catch(...) {return -1;}
+}
+int decide_routing(void*,const tronix_watchcore_routing_request_t* in,
+                   tronix_watchcore_routing_result_t* out) noexcept {
+    if(!in || !out || in->operation<0 || in->operation>1 ||
+       !finite(in->now_utc_seconds) ||
+       in->agent_count>TRONIX_WATCHCORE_MAX_AGENTS ||
+       (in->agent_count && !in->agents) ||
+       in->role_count>TRONIX_WATCHCORE_MAX_ROLES ||
+       (in->role_count && !in->roles) ||
+       in->exclude_count>TRONIX_WATCHCORE_MAX_AGENTS ||
+       (in->exclude_count && !in->exclude_agents) ||
+       in->seen_count>TRONIX_WATCHCORE_MAX_AGENTS ||
+       (in->seen_count && !in->seen_vendors) ||
+       !bit_ok(in->require_unseen_vendor) ||
+       !states_ok(in->states,in->state_count)) return -1;
+    try {
+        std::vector<watchcore::Agent> agents;
+        agents.reserve(in->agent_count);
+        for(size_t i=0;i<in->agent_count;++i) {
+            const auto& a=in->agents[i];
+            if (!label_ok(a.name) || !label_ok(a.vendor) ||
+                !bit_ok(a.binary_available)) return -1;
+            agents.push_back({a.name,a.vendor,a.binary_available!=0});
+        }
+        std::set<std::string> exclude,seen;
+        for(size_t i=0;i<in->exclude_count;++i) {
+            if(!label_ok(in->exclude_agents[i])) return -1;
+            exclude.insert(in->exclude_agents[i]);
+        }
+        for(size_t i=0;i<in->seen_count;++i) {
+            if(!label_ok(in->seen_vendors[i])) return -1;
+            seen.insert(in->seen_vendors[i]);
+        }
+        const auto states=convert_states(in->states,in->state_count);
+        *out={-1,0,0,0,0,0};
+        if(in->operation==0) {
+            if(in->role_count!=0) return -1;
+            const auto result=watchcore::pick_agent(
+                agents,states,in->now_utc_seconds,exclude,seen,
+                in->require_unseen_vendor!=0);
+            out->unavailable_reason=static_cast<int>(result.reason);
+            if(result.agent) {
+                for(size_t i=0;i<agents.size();++i) {
+                    if(agents[i].name==*result.agent) {
+                        out->selected_index=static_cast<int>(i);
+                        break;
+                    }
+                }
+                if(out->selected_index<0) return -1;
+            }
+        } else {
+            if(in->exclude_count || in->seen_count ||
+               in->require_unseen_vendor) return -1;
+            std::vector<std::vector<watchcore::Agent>> roles;
+            roles.reserve(in->role_count);
+            for(size_t i=0;i<in->role_count;++i) {
+                const auto& r=in->roles[i];
+                if(r.offset>in->agent_count ||
+                   r.length>in->agent_count-r.offset) return -1;
+                roles.emplace_back(agents.begin()+static_cast<std::ptrdiff_t>(r.offset),
+                                   agents.begin()+static_cast<std::ptrdiff_t>(r.offset+r.length));
+            }
+            const auto ready=watchcore::roles_ready_at(roles,states,in->now_utc_seconds);
+            if(ready) {
+                if(!finite(*ready)) return -1;
+                out->has_ready_at=1;
+                out->ready_at_utc_seconds=*ready;
+            }
+            out->stop_pass=watchcore::should_stop_pass(
+                roles,states,in->now_utc_seconds)?1:0;
+            out->skip_item=watchcore::should_skip_item(
+                roles,states,in->now_utc_seconds)?1:0;
+        }
+        return 0;
+    } catch(...) {return -1;}
+}
 celix_status_t start(State *state, celix_bundle_context_t *ctx) {
     state->service.handle = state;
     state->service.decide = decide;
@@ -129,9 +284,47 @@ celix_status_t start(State *state, celix_bundle_context_t *ctx) {
         state->service_id = -1;
         return CELIX_SERVICE_EXCEPTION;
     }
+    state->cooldown_service.handle=state;
+    state->cooldown_service.decide=decide_cooldown;
+    celix_service_registration_options_t cooldown_opts{};
+    cooldown_opts.svc=&state->cooldown_service;
+    cooldown_opts.serviceName=TRONIX_WATCHCORE_COOLDOWN_NAME;
+    cooldown_opts.serviceVersion=TRONIX_WATCHCORE_COOLDOWN_VERSION;
+    state->cooldown_service_id=
+        celix_bundleContext_registerServiceWithOptions(ctx,&cooldown_opts);
+    if(state->cooldown_service_id<0) {
+        celix_bundleContext_unregisterService(ctx,state->ledger_service_id);
+        celix_bundleContext_unregisterService(ctx,state->service_id);
+        state->ledger_service_id=state->service_id=-1;
+        return CELIX_SERVICE_EXCEPTION;
+    }
+    state->routing_service.handle=state;
+    state->routing_service.decide=decide_routing;
+    celix_service_registration_options_t routing_opts{};
+    routing_opts.svc=&state->routing_service;
+    routing_opts.serviceName=TRONIX_WATCHCORE_ROUTING_NAME;
+    routing_opts.serviceVersion=TRONIX_WATCHCORE_ROUTING_VERSION;
+    state->routing_service_id=
+        celix_bundleContext_registerServiceWithOptions(ctx,&routing_opts);
+    if(state->routing_service_id<0) {
+        celix_bundleContext_unregisterService(ctx,state->cooldown_service_id);
+        celix_bundleContext_unregisterService(ctx,state->ledger_service_id);
+        celix_bundleContext_unregisterService(ctx,state->service_id);
+        state->routing_service_id=state->cooldown_service_id=
+            state->ledger_service_id=state->service_id=-1;
+        return CELIX_SERVICE_EXCEPTION;
+    }
     return CELIX_SUCCESS;
 }
 celix_status_t stop(State *state, celix_bundle_context_t *ctx) {
+    if (state->routing_service_id >= 0) {
+        celix_bundleContext_unregisterService(ctx,state->routing_service_id);
+        state->routing_service_id=-1;
+    }
+    if (state->cooldown_service_id >= 0) {
+        celix_bundleContext_unregisterService(ctx,state->cooldown_service_id);
+        state->cooldown_service_id=-1;
+    }
     if (state->ledger_service_id >= 0) {
         celix_bundleContext_unregisterService(ctx, state->ledger_service_id);
         state->ledger_service_id = -1;
