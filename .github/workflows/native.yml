@@ -48,7 +48,7 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release             -DCELIX_SOURCE="$RUNNER_TEMP/apache-celix"             -DMSGPACK_SOURCE="$RUNNER_TEMP/msgpack-c"
 
       - name: Build native runtime and fixture bundles
-        run: cmake --build build --target tronixd tronix_worker tronix_scheduler_bundle tronix_demo_bundle tronix_answer_verifier_bundle tronix_verify_once tronix_verify_daemon -j 3
+        run: cmake --build build --target tronixd tronix_worker tronix_scheduler_bundle tronix_demo_bundle tronix_answer_verifier_bundle tronix_verify_once tronix_verify_daemon tronix_watchcore_security_bundle tronix_watchcore_shadow tronix_watchcore_reference tronix_watchcore_unit_tests -j 3
 
       - name: Install pinned MessagePack client
         run: npm ci --ignore-scripts
@@ -61,6 +61,19 @@ jobs:
 
       - name: Run persistent typed Celix verification and review-gate checks
         run: npm run test:verification
+
+      - name: Verify preserved C++20 Watchcore unit assertions
+        run: ./build/tronix_watchcore_unit_tests
+
+      - name: Run genuine Celix Watchcore native differential and failure containment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/watchcore_celix_integration.py \
+            "$(realpath build/tronix_watchcore_shadow)" \
+            "$(realpath build/tronix_watchcore_reference)" \
+            "$(realpath build/tronix_watchcore_security.zip)" \
+            "$(realpath build/tronix_demo.zip)"
 
       - name: Verify license metadata
         run: npm run license:check

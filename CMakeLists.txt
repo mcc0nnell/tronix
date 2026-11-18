@@ -103,3 +103,45 @@ target_compile_definitions(tronix_verify_daemon PRIVATE MSGPACK_NO_BOOST=1)
 target_link_libraries(tronix_verify_daemon PRIVATE Celix::framework OpenSSL::Crypto)
 set_target_properties(tronix_verify_daemon PROPERTIES BUILD_RPATH
   "${CMAKE_BINARY_DIR}/apache-celix/libs/framework;${CMAKE_BINARY_DIR}/apache-celix/libs/utils")
+
+# Isolated C++20 Atlas Watchcore: observation-only native decision core.
+# Original deterministic logic is preserved in integrations/atlas-watchcore.
+add_library(tronix_watchcore_native STATIC
+  integrations/atlas-watchcore/src/watchcore.cpp)
+target_include_directories(tronix_watchcore_native PUBLIC
+  integrations/atlas-watchcore/include)
+target_compile_features(tronix_watchcore_native PUBLIC cxx_std_20)
+set_target_properties(tronix_watchcore_native PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_options(tronix_watchcore_native PRIVATE -Wall -Wextra -Wpedantic)
+
+# True Celix service; registers on bundle start, unregisters on stop.
+add_celix_bundle(tronix_watchcore_security
+  VERSION 0.1.0 SYMBOLIC_NAME org.tronix.watchcore.security
+  NAME "TRONIX observation-only Atlas Watchcore decision service"
+  FILENAME tronix_watchcore_security SOURCES src/watchcore_bundle.cc)
+target_include_directories(tronix_watchcore_security PRIVATE include)
+target_link_libraries(tronix_watchcore_security PRIVATE
+  tronix_watchcore_native Celix::framework)
+target_compile_features(tronix_watchcore_security PRIVATE cxx_std_20)
+
+# External Rizzer MR !74 compatible numeric-only executable: bundles are
+# operator-supplied, SHA-256 pinned, privately staged and loaded by Celix.
+add_executable(tronix_watchcore_shadow src/watchcore_celix_shadow.cc)
+target_include_directories(tronix_watchcore_shadow PRIVATE include)
+target_compile_features(tronix_watchcore_shadow PRIVATE cxx_std_20)
+target_link_libraries(tronix_watchcore_shadow PRIVATE Celix::framework
+  OpenSSL::Crypto "${LIBZIP_LIBRARY}" "${JANSSON_LIBRARY}")
+set_target_properties(tronix_watchcore_shadow PROPERTIES BUILD_RPATH
+  "${CMAKE_BINARY_DIR}/apache-celix/libs/framework;${CMAKE_BINARY_DIR}/apache-celix/libs/utils")
+
+# Independent original source oracle for differential regression testing.
+add_executable(tronix_watchcore_reference
+  integrations/atlas-watchcore/src/shadow_security.cpp)
+target_link_libraries(tronix_watchcore_reference PRIVATE tronix_watchcore_native)
+target_compile_features(tronix_watchcore_reference PRIVATE cxx_std_20)
+
+# Preserve and execute the original standalone core assertions in native CI.
+add_executable(tronix_watchcore_unit_tests
+  integrations/atlas-watchcore/tests/watchcore_tests.cpp)
+target_link_libraries(tronix_watchcore_unit_tests PRIVATE tronix_watchcore_native)
+target_compile_features(tronix_watchcore_unit_tests PRIVATE cxx_std_20)
