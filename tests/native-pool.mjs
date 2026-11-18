@@ -98,6 +98,28 @@ try{
       await stop(single.child);
     }
   });
+  await check('saturated admission retains only bounded daemon descriptors',async()=>{
+    const single=launch(['--workers','1']);
+    assert.equal(await single.ready,true);
+    const clients=[];
+    try{
+      const baseline=(await fs.readdir('/proc/'+single.child.pid+'/fd')).length;
+      // Each client is deliberately idle; never touches live services.
+      for(let i=0;i<80;i++){
+        const peer=net.createConnection(socket);
+        peer.on('error',()=>{});
+        clients.push(peer);
+      }
+      await delay(250);
+      const held=(await fs.readdir('/proc/'+single.child.pid+'/fd')).length;
+      // Worker 1 + queue 32; one racing accept and one FD margin.
+      assert.ok(held<=baseline+35,
+        'unbounded accepted descriptors: '+held+' baseline '+baseline);
+    }finally{
+      for(const peer of clients)peer.destroy();
+      await stop(single.child);
+    }
+  });
   const server=launch(['--workers','4']);
   assert.equal(await server.ready,true);
   const slow=[];

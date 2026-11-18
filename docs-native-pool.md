@@ -66,10 +66,12 @@ Operator invocation (absolute owner-controlled paths as documented in
 ## Tested behavior on Butcher (November 17–18, 2026)
 
 - Baseline persistent verifier integration: 22/22 passed before pool.
-- Native pool tests: **6/6 passed** with the real pinned Celix service,
-  including 3 idle peers vs. a 4th active worker, 72 concurrent candidate
-  outcomes, frozen oracle stability, invalid settings, cleanup and a single
-  slow-drip client being closed at the absolute deadline.
+- Native pool tests: **7/7 passed** with the real pinned Celix service,
+  including 3 idle peers vs. a 4th active worker, 72 bounded concurrent
+  candidate outcomes, frozen oracle stability, invalid settings, cleanup,
+  a single slow-drip client closed at the absolute deadline, and a local
+  80-connection flood retaining only a bounded number of daemon descriptors.
+  The seven tests passed in three consecutive local runs.
 - Existing persistent verifier integration: 22/22 passed after pool.
 - Batch helper: 6/6 local unit tests pass.
 - License checker: passed.
