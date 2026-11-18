@@ -17,5 +17,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Verify pinned Watchcore source and license bytes offline
+        run: |
+          python3 scripts/verify_watchcore_source.py
+          python3 -m unittest discover -s tests -p 'test_watchcore_source_lock.py' -v
       - name: Verify license metadata and SPDX headers
         run: npm run license:check

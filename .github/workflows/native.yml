@@ -30,6 +30,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends             build-essential cmake ninja-build pkg-config zip             uuid-dev zlib1g-dev libzip-dev libjansson-dev             libcurl4-openssl-dev libffi-dev libxml2-dev libuv1-dev
 
+      - name: Verify pinned, offline NeonOxide Watchcore source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_watchcore_source.py
+          python3 -m unittest discover -s tests -p 'test_watchcore_source_lock.py' -v
+
       - name: Fetch exactly pinned native dependencies
         shell: bash
         run: |
