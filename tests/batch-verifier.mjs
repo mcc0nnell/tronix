@@ -44,6 +44,8 @@ test('preflight rejects invalid or duplicate candidates without dispatch',async(
   let called=0;const verify=async()=>{called++;};
   for(const bad of [
     [entry(0),entry(0)],
+    [{...entry(0),candidateId:undefined}],
+    [{...entry(0),taskId:undefined}],
     [entry(0),{...entry(1),taskId:'unsafe/operation'}],
     [entry(0),{...entry(1),answer:Buffer.alloc(65537)}],
     Array.from({length:129},(_,i)=>entry(i)),
