@@ -167,3 +167,11 @@ review, CI evidence, and explicit owner authorization.
 The native CI workflow runs only the source-local test without a private
 Rizzer checkout. Its GitHub Actions execution remains subject to the known
 GitHub account billing lock; do not label an unstarted run as passing.
+
+## Canonical-source follow-on (stacked draft)
+
+The source-only NeonOxide distribution contract is described in
+[docs-watchcore-neonoxide-source.md](docs-watchcore-neonoxide-source.md).
+Public TRONIX retains the unchanged snapshot and independently verifies its
+pinned source hashes before native CI. This does not enable a new service,
+new capabilities, promotion, deployment, or source-code deletion.

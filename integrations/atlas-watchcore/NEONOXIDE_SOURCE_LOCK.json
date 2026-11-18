@@ -1,0 +1,21 @@
+{
+  "canonical_path": "components/watchcore",
+  "canonical_repository": "https://github.com/mcc0nnell/NeonOxide",
+  "canonical_source_commit": "c408c190b8e1bc30df7aa23cfd9677e88eb6afb6",
+  "files_sha256": {
+    "CMakeLists.txt": "85ea0c47c24d0a4de2f9826e7c2b8e7308af42a0367309de44ae07846a581912",
+    "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "NOTICE": "4cdeae45bf623509585d7359dc47aad8a4441ef07961bf8b919b682eaae7d6f3",
+    "include/watchcore/watchcore.hpp": "07f3ae4130fe3f5a831749bb86cf66b6be8c93e697c5e7a71333f6def87b608f",
+    "src/shadow_security.cpp": "157a0f9fd289e39419c881a8bfd02e4f0f4e72b03cc4c55257e4aed6dd354d86",
+    "src/watchcore.cpp": "add3a242f772683bc47b9322600406355fc8fcc6bd55a3a0adebc66b0d521a86",
+    "tests/watchcore_tests.cpp": "9dba4a490c460dd81ad95c83fb23cfc0349cd6f3ef853b8ff7238f9c2ee835db"
+  },
+  "origin_commit": "019e681d43e5906ec0c42b63ea61c2f17f3a3cab",
+  "origin_path": "integrations/atlas-watchcore",
+  "origin_repository": "https://github.com/mcc0nnell/tronix",
+  "schema": "neonoxide.watchcore.release.v1",
+  "source_manifest_sha256": "332b0b5dbe54fb777299d64e29c4c97465271e5e42999129ce00fa39767d5381",
+  "tree_sha256": "fe3896262506d9bfb62152f563987ba28e84b9d509c74cad541e87e718ef2911",
+  "version": "0.1.0"
+}
